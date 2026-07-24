@@ -1077,7 +1077,7 @@ function PayerPicker({ candidates, value, onChange }) {
 
 /* ============================== Receipt (closed group) ============================== */
 
-function ReceiptView({ group, me, canEdit, onGroupUpdated, onGoToProfile, onDeleteGroup }) {
+function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, onDeleteGroup }) {
   const [expanded, setExpanded] = useState({});
   const [editingPayer, setEditingPayer] = useState(false);
   const [payerDraft, setPayerDraft] = useState("");
@@ -1085,6 +1085,7 @@ function ReceiptView({ group, me, canEdit, onGroupUpdated, onGoToProfile, onDele
   const [profile, setProfile] = useState(undefined);
   const [togglingPerson, setTogglingPerson] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmAllPaid, setConfirmAllPaid] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [actionError, setActionError] = useState("");
   const entries = Object.entries(group.memberOrders || {});
@@ -1149,6 +1150,18 @@ function ReceiptView({ group, me, canEdit, onGroupUpdated, onGoToProfile, onDele
     }
   };
 
+  const markAllPaidAndDelete = async () => {
+    setDeleting(true);
+    setActionError("");
+    try {
+      await api.markAllPaid(group.id);
+      await onDeleteGroup?.();
+    } catch (e) {
+      setActionError(e.message || "操作失敗");
+      setDeleting(false);
+    }
+  };
+
   const displayContact = profile?.contact || group.payerContact || null;
   const displayQr = profile?.qrImage || group.payerQrImage || null;
 
@@ -1160,6 +1173,18 @@ function ReceiptView({ group, me, canEdit, onGroupUpdated, onGoToProfile, onDele
           <span className="stamp-badge text-xs">已結單</span>
         </div>
         <div className="text-xs" style={{ color: "var(--ink-soft)" }}>{group.storeName}・共 {entries.length} 人</div>
+        {menu?.storePhone && (
+          <a
+            href={`tel:${menu.storePhone.replace(/[^0-9+]/g, "")}`}
+            className="flex items-center justify-between rounded-xl px-3 py-2"
+            style={{ background: "var(--paper)" }}
+          >
+            <span className="flex items-center gap-2 text-sm font-bold">
+              <Phone size={14} style={{ color: "var(--stamp)" }} /> {menu.storePhone}
+            </span>
+            <span className="text-xs font-bold" style={{ color: "var(--stamp)" }}>點此撥打</span>
+          </a>
+        )}
 
         <div className="rounded-xl p-3 flex flex-col gap-2" style={{ background: "var(--till-bg)" }}>
           {!editingPayer ? (
@@ -1310,7 +1335,37 @@ function ReceiptView({ group, me, canEdit, onGroupUpdated, onGoToProfile, onDele
         </div>
       )}
 
-      {canEdit && allPaid && (
+      {isMe && (
+        <div className="pt-3">
+          {!confirmAllPaid ? (
+            <button
+              onClick={() => setConfirmAllPaid(true)}
+              className="w-full rounded-xl py-2.5 text-sm font-bold flex items-center justify-center gap-2"
+              style={{ background: "var(--till)", color: "#fff" }}
+            >
+              <CheckCircle2 size={15} /> 錢全部都收齊，刪除這團
+            </button>
+          ) : (
+            <div className="goa-card p-3 flex flex-col gap-2 goa-pop">
+              <div className="text-sm text-center font-bold">確定大家的錢都收齊了嗎？這會把所有人標記為已付款，並直接刪除這團紀錄，無法復原。</div>
+              <div className="flex gap-2">
+                <button onClick={() => setConfirmAllPaid(false)} disabled={deleting} className="goa-btn-outline rounded-xl py-2 text-sm font-bold flex-1">取消</button>
+                <button
+                  onClick={markAllPaidAndDelete}
+                  disabled={deleting}
+                  className="rounded-xl py-2 text-sm font-bold flex-1 flex items-center justify-center gap-1.5"
+                  style={{ background: "var(--till)", color: "#fff" }}
+                >
+                  {deleting ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                  確定收齊並刪除
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {!isMe && canEdit && allPaid && (
         <div className="pt-3">
           {!confirmDelete ? (
             <button
@@ -1519,7 +1574,7 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile }) {
     return (
       <div className="pb-10">
         <TopBar title={group.groupName} subtitle={group.storeName} onBack={onBack} />
-        <ReceiptView group={group} me={me} canEdit={isCreator} onGroupUpdated={setGroup} onGoToProfile={onGoToProfile} onDeleteGroup={deleteGroup} />
+        <ReceiptView group={group} menu={menu} me={me} canEdit={isCreator} onGroupUpdated={setGroup} onGoToProfile={onGoToProfile} onDeleteGroup={deleteGroup} />
       </div>
     );
   }
