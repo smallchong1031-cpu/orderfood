@@ -13,7 +13,7 @@ import {
   Plus, Minus, ChevronLeft, ChevronDown, Loader2, Users, Receipt,
   Check, Store, RefreshCw, Eye, EyeOff, AlertCircle, Sparkles,
   UserRound, Lock, ImagePlus, Trash2, PencilLine, Wallet, QrCode,
-  Circle, CheckCircle2, Share2, Upload, Phone, GripVertical,
+  Circle, CheckCircle2, Share2, Upload, Phone, GripVertical, ListChecks,
 } from "lucide-react";
 import { api } from "./api";
 import { getMyName, setMyName } from "./identity";
@@ -37,6 +37,16 @@ function groupItemsByCategory(items) {
     map.get(cat).push(it);
   }
   return order.map((category) => ({ category, items: map.get(category) }));
+}
+
+// 把訂購紀錄裡的必選項目（例如肉類：牛肉）跟備註組成一段括號文字，供列表/收據顯示。
+function formatOrderItemDetails(orderItem) {
+  const parts = [];
+  (orderItem.options || []).forEach((o) => {
+    if (o.choice) parts.push(o.choice);
+  });
+  if (orderItem.note) parts.push(orderItem.note);
+  return parts.length ? `（${parts.join("、")}）` : "";
 }
 
 function resizeImageToBase64(file, maxDim = 1100) {
@@ -412,6 +422,8 @@ function MenuLibrary({ onOpenMenu, onUpload, refreshKey }) {
 
 function SortableItemRow({ item, updateItem, removeItem }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id });
+  const [showOptions, setShowOptions] = useState(false);
+  const [choicesDraft, setChoicesDraft] = useState({}); // groupId -> 正在輸入中的原始文字（避免打字被重組打斷）
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -420,6 +432,36 @@ function SortableItemRow({ item, updateItem, removeItem }) {
     position: "relative",
     background: isDragging ? "var(--card)" : "transparent",
   };
+
+  const optionGroups = item.optionGroups || [];
+
+  const addOptionGroup = () => {
+    updateItem(item.id, { optionGroups: [...optionGroups, { id: uid("og"), name: "", choices: [] }] });
+    setShowOptions(true);
+  };
+  const updateOptionGroup = (groupId, patch) => {
+    updateItem(item.id, { optionGroups: optionGroups.map((g) => (g.id === groupId ? { ...g, ...patch } : g)) });
+  };
+  const removeOptionGroup = (groupId) => {
+    updateItem(item.id, { optionGroups: optionGroups.filter((g) => g.id !== groupId) });
+    setChoicesDraft((prev) => {
+      const next = { ...prev };
+      delete next[groupId];
+      return next;
+    });
+  };
+  const commitChoices = (groupId) => {
+    const raw = choicesDraft[groupId];
+    if (raw === undefined) return;
+    const parsed = raw.split(/[,，、]/).map((s) => s.trim()).filter(Boolean);
+    updateOptionGroup(groupId, { choices: parsed });
+    setChoicesDraft((prev) => {
+      const next = { ...prev };
+      delete next[groupId];
+      return next;
+    });
+  };
+
   return (
     <div ref={setNodeRef} style={style} className="flex flex-col gap-1">
       <div className="flex items-center gap-1.5">
@@ -457,6 +499,44 @@ function SortableItemRow({ item, updateItem, removeItem }) {
         className="goa-input rounded-lg px-2.5 py-1 text-xs ml-6"
         style={{ color: "var(--ink-soft)", maxWidth: 220 }}
       />
+
+      <button
+        onClick={() => setShowOptions((v) => !v)}
+        className="text-xs font-bold flex items-center gap-1 ml-6"
+        style={{ color: optionGroups.length ? "var(--stamp)" : "var(--ink-soft)" }}
+      >
+        <ListChecks size={12} /> 必選項目{optionGroups.length ? `（${optionGroups.length}）` : ""}
+      </button>
+
+      {showOptions && (
+        <div className="flex flex-col gap-2 ml-6 p-2 rounded-lg" style={{ background: "var(--paper)" }}>
+          {optionGroups.map((group) => (
+            <div key={group.id} className="flex flex-col gap-1">
+              <div className="flex items-center gap-1.5">
+                <input
+                  value={group.name}
+                  onChange={(e) => updateOptionGroup(group.id, { name: e.target.value })}
+                  placeholder="選項名稱（例如：選擇肉類）"
+                  className="goa-input flex-1 rounded-lg px-2 py-1.5 text-xs"
+                />
+                <button onClick={() => removeOptionGroup(group.id)} className="p-1 shrink-0" style={{ color: "var(--ink-soft)" }}>
+                  <Trash2 size={13} />
+                </button>
+              </div>
+              <input
+                value={choicesDraft[group.id] !== undefined ? choicesDraft[group.id] : (group.choices || []).join("、")}
+                onChange={(e) => setChoicesDraft((prev) => ({ ...prev, [group.id]: e.target.value }))}
+                onBlur={() => commitChoices(group.id)}
+                placeholder="選項內容，用頓號分隔，例如：豬肉、牛肉、雞肉"
+                className="goa-input rounded-lg px-2 py-1.5 text-xs"
+              />
+            </div>
+          ))}
+          <button onClick={addOptionGroup} className="text-xs font-bold flex items-center gap-1" style={{ color: "var(--stamp)" }}>
+            <Plus size={12} /> 新增必選項目
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -820,9 +900,16 @@ function MenuDetail({ menuId, onBack, onGroupCreated, onUpdateMenu }) {
                   {isOpen && (
                     <div className={showHeaders ? "mt-1.5" : ""}>
                       {group.items.map((it, i) => (
-                        <div key={it.id} className={`flex items-center justify-between py-2.5 ${i > 0 ? "goa-divider" : ""}`}>
-                          <span className="text-sm">{it.name}</span>
-                          <span className="goa-mono font-bold text-sm">{currency(it.price)}</span>
+                        <div key={it.id} className={`py-2.5 ${i > 0 ? "goa-divider" : ""}`}>
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm">{it.name}</span>
+                            <span className="goa-mono font-bold text-sm">{currency(it.price)}</span>
+                          </div>
+                          {(it.optionGroups || []).filter((g) => g.choices?.length).map((g) => (
+                            <div key={g.id} className="text-xs mt-0.5" style={{ color: "var(--stamp)" }}>
+                              需選擇{g.name ? `「${g.name}」` : ""}：{g.choices.join("／")}
+                            </div>
+                          ))}
                         </div>
                       ))}
                     </div>
@@ -1148,7 +1235,7 @@ function ReceiptView({ group, me, canEdit, onGroupUpdated, onGoToProfile, onDele
                 <div className="mt-1.5 pl-7 flex flex-col gap-1">
                   {(order.items || []).map((it) => (
                     <div key={it.itemId} className="flex items-center justify-between text-xs" style={{ color: "var(--ink-soft)" }}>
-                      <span>{it.name} × {it.qty}{it.note ? `（${it.note}）` : ""}</span>
+                      <span>{it.name} × {it.qty}{formatOrderItemDetails(it)}</span>
                       <span className="goa-mono">{currency(it.price * it.qty)}</span>
                     </div>
                   ))}
@@ -1217,6 +1304,7 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile }) {
   const [group, setGroup] = useState(null);
   const [menu, setMenu] = useState(null);
   const [myQty, setMyQty] = useState({});
+  const [myOptions, setMyOptions] = useState({}); // { [itemId]: { [groupId]: choice } }
   const [myNotes, setMyNotes] = useState({});
   const [saving, setSaving] = useState(false);
   const [closing, setClosing] = useState(false);
@@ -1252,9 +1340,18 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile }) {
         const mine = g.memberOrders?.[me];
         const q = {};
         const n = {};
-        (mine?.items || []).forEach((it) => { q[it.itemId] = it.qty; n[it.itemId] = it.note || ""; });
+        const o = {};
+        (mine?.items || []).forEach((it) => {
+          q[it.itemId] = it.qty;
+          n[it.itemId] = it.note || "";
+          if (it.options && it.options.length) {
+            o[it.itemId] = {};
+            it.options.forEach((opt) => { o[it.itemId][opt.groupId] = opt.choice; });
+          }
+        });
         setMyQty(q);
         setMyNotes(n);
+        setMyOptions(o);
         const menuData = menuRef.current;
         if (menuData && mine?.items?.length) {
           const orderedIds = new Set(mine.items.map((it) => it.itemId));
@@ -1289,12 +1386,33 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile }) {
   const myTotal = menu ? menu.items.reduce((s, it) => s + (myQty[it.id] || 0) * it.price, 0) : 0;
 
   const submitOrder = async () => {
-    setSaving(true);
     setError("");
+    // 驗證：有數量的品項，如果底下有必選項目，一定要選過才能送出
+    for (const it of menu.items) {
+      const qty = myQty[it.id] || 0;
+      if (qty <= 0) continue;
+      for (const group of it.optionGroups || []) {
+        if (!group.choices?.length) continue;
+        if (!myOptions[it.id]?.[group.id]) {
+          setError(`「${it.name}」還需要選擇「${group.name || "必選項目"}」才能送出`);
+          return;
+        }
+      }
+    }
+    setSaving(true);
     try {
       const items = menu.items
         .filter((it) => (myQty[it.id] || 0) > 0)
-        .map((it) => ({ itemId: it.id, name: it.name, price: it.price, qty: myQty[it.id], note: (myNotes[it.id] || "").trim() }));
+        .map((it) => ({
+          itemId: it.id,
+          name: it.name,
+          price: it.price,
+          qty: myQty[it.id],
+          note: (myNotes[it.id] || "").trim(),
+          options: (it.optionGroups || [])
+            .filter((g) => myOptions[it.id]?.[g.id])
+            .map((g) => ({ groupId: g.id, groupName: g.name || "必選", choice: myOptions[it.id][g.id] })),
+        }));
       const total = items.reduce((s, it) => s + it.price * it.qty, 0);
       const order = items.length === 0 ? null : { items, total };
       const updated = await api.submitOrder(groupId, { person: me, order });
@@ -1476,6 +1594,35 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile }) {
                             </button>
                           </div>
                         </div>
+                        {(myQty[it.id] || 0) > 0 && (it.optionGroups || []).filter((g) => g.choices?.length).map((group) => (
+                          <div key={group.id} className="mt-1.5">
+                            <div className="text-xs font-bold mb-1 flex items-center gap-1">
+                              <span>{group.name || "必選項目"}</span>
+                              <span style={{ color: "var(--stamp)" }}>必選</span>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {group.choices.map((choice) => {
+                                const selected = myOptions[it.id]?.[group.id] === choice;
+                                return (
+                                  <button
+                                    key={choice}
+                                    onClick={() =>
+                                      setMyOptions((prev) => ({ ...prev, [it.id]: { ...prev[it.id], [group.id]: choice } }))
+                                    }
+                                    className="text-xs font-bold px-2.5 py-1 rounded-full"
+                                    style={
+                                      selected
+                                        ? { background: "var(--stamp)", color: "#fff" }
+                                        : { background: "transparent", border: "1.5px solid var(--line)", color: "var(--ink-soft)" }
+                                    }
+                                  >
+                                    {choice}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))}
                         {(myQty[it.id] || 0) > 0 && (
                           <input
                             value={myNotes[it.id] || ""}
@@ -1521,7 +1668,7 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile }) {
                   <span className="goa-mono font-bold text-sm">{currency(order.total)}</span>
                 </div>
                 <div className="text-xs mt-0.5" style={{ color: "var(--ink-soft)" }}>
-                  {(order.items || []).map((it) => it.note ? `${it.name}×${it.qty}（${it.note}）` : `${it.name}×${it.qty}`).join("、")}
+                  {(order.items || []).map((it) => `${it.name}×${it.qty}${formatOrderItemDetails(it)}`).join("、")}
                 </div>
               </div>
             ))
