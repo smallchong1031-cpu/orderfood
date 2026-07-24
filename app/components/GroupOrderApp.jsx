@@ -1029,6 +1029,52 @@ function GroupList({ onOpenGroup, refreshKey }) {
   );
 }
 
+/* ============================== Payer Picker ============================== */
+
+function PayerPicker({ candidates, value, onChange }) {
+  const [customMode, setCustomMode] = useState(!!value && !candidates.includes(value));
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap gap-1.5">
+        {candidates.map((name) => (
+          <button
+            key={name}
+            onClick={() => { onChange(name); setCustomMode(false); }}
+            className="text-xs font-bold px-2.5 py-1.5 rounded-full"
+            style={
+              !customMode && value === name
+                ? { background: "var(--till)", color: "#fff" }
+                : { background: "transparent", border: "1.5px solid var(--line)", color: "var(--ink-soft)" }
+            }
+          >
+            {name}
+          </button>
+        ))}
+        <button
+          onClick={() => setCustomMode(true)}
+          className="text-xs font-bold px-2.5 py-1.5 rounded-full"
+          style={
+            customMode
+              ? { background: "var(--till)", color: "#fff" }
+              : { background: "transparent", border: "1.5px dashed var(--line)", color: "var(--ink-soft)" }
+          }
+        >
+          其他
+        </button>
+      </div>
+      {customMode && (
+        <input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="輸入名字"
+          className="goa-input rounded-lg px-3 py-2 text-sm"
+          autoFocus
+        />
+      )}
+    </div>
+  );
+}
+
 /* ============================== Receipt (closed group) ============================== */
 
 function ReceiptView({ group, me, canEdit, onGroupUpdated, onGoToProfile, onDeleteGroup }) {
@@ -1135,11 +1181,10 @@ function ReceiptView({ group, me, canEdit, onGroupUpdated, onGoToProfile, onDele
           ) : (
             <div className="flex flex-col gap-2">
               <label className="text-xs font-bold" style={{ color: "var(--till)" }}>這攤實際上是誰付的錢？</label>
-              <input
+              <PayerPicker
+                candidates={Array.from(new Set([group.creatorName, ...entries.map(([p]) => p)].filter(Boolean)))}
                 value={payerDraft}
-                onChange={(e) => setPayerDraft(e.target.value)}
-                className="goa-input rounded-xl px-3 py-2 text-sm"
-                autoFocus
+                onChange={setPayerDraft}
               />
               <div className="flex gap-2">
                 <button onClick={() => setEditingPayer(false)} disabled={savingPayer} className="goa-btn-outline rounded-xl py-2 text-sm font-bold flex-1">取消</button>
@@ -1702,14 +1747,13 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile }) {
             <div className="goa-card p-3 flex flex-col gap-2 goa-pop shadow-lg">
               <div className="text-sm text-center font-bold">確定要結單嗎？結單後大家就不能再修改點餐了。</div>
               <div>
-                <label className="text-xs font-bold flex items-center gap-1" style={{ color: "var(--ink-soft)" }}>
+                <label className="text-xs font-bold flex items-center gap-1 mb-1.5" style={{ color: "var(--ink-soft)" }}>
                   <Wallet size={12} /> 這攤是誰付的錢？
                 </label>
-                <input
+                <PayerPicker
+                  candidates={Array.from(new Set([group.creatorName, ...members.map(([p]) => p)].filter(Boolean)))}
                   value={payerDraft}
-                  onChange={(e) => setPayerDraft(e.target.value)}
-                  className="goa-input w-full rounded-xl px-3 py-2 text-sm mt-1"
-                  placeholder="填付款人的稱呼"
+                  onChange={setPayerDraft}
                 />
               </div>
               <div className="flex gap-2">
