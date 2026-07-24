@@ -994,7 +994,7 @@ function ReceiptView({ group, me, canEdit, onGroupUpdated, onGoToProfile, onDele
                 <div className="mt-1.5 pl-7 flex flex-col gap-1">
                   {(order.items || []).map((it) => (
                     <div key={it.itemId} className="flex items-center justify-between text-xs" style={{ color: "var(--ink-soft)" }}>
-                      <span>{it.name} × {it.qty}</span>
+                      <span>{it.name} × {it.qty}{it.note ? `（${it.note}）` : ""}</span>
                       <span className="goa-mono">{currency(it.price * it.qty)}</span>
                     </div>
                   ))}
@@ -1063,6 +1063,7 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile }) {
   const [group, setGroup] = useState(null);
   const [menu, setMenu] = useState(null);
   const [myQty, setMyQty] = useState({});
+  const [myNotes, setMyNotes] = useState({});
   const [saving, setSaving] = useState(false);
   const [closing, setClosing] = useState(false);
   const [confirmingClose, setConfirmingClose] = useState(false);
@@ -1086,8 +1087,10 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile }) {
       if (initQty) {
         const mine = g.memberOrders?.[me];
         const q = {};
-        (mine?.items || []).forEach((it) => { q[it.itemId] = it.qty; });
+        const n = {};
+        (mine?.items || []).forEach((it) => { q[it.itemId] = it.qty; n[it.itemId] = it.note || ""; });
         setMyQty(q);
+        setMyNotes(n);
       }
     } catch (e) {
       setError(e.message || "讀取失敗");
@@ -1118,7 +1121,7 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile }) {
     try {
       const items = menu.items
         .filter((it) => (myQty[it.id] || 0) > 0)
-        .map((it) => ({ itemId: it.id, name: it.name, price: it.price, qty: myQty[it.id] }));
+        .map((it) => ({ itemId: it.id, name: it.name, price: it.price, qty: myQty[it.id], note: (myNotes[it.id] || "").trim() }));
       const total = items.reduce((s, it) => s + it.price * it.qty, 0);
       const order = items.length === 0 ? null : { items, total };
       const updated = await api.submitOrder(groupId, { person: me, order });
@@ -1238,20 +1241,31 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile }) {
         <div className="goa-card p-4">
           <div className="text-xs font-bold mb-2" style={{ color: "var(--ink-soft)" }}>我要點的餐</div>
           {menu.items.map((it, i) => (
-            <div key={it.id} className={`flex items-center justify-between py-2.5 ${i > 0 ? "goa-divider" : ""}`}>
-              <div className="min-w-0 flex-1">
-                <div className="text-sm truncate">{it.name}</div>
-                <div className="goa-mono text-xs" style={{ color: "var(--ink-soft)" }}>{currency(it.price)}</div>
+            <div key={it.id} className={`py-2.5 ${i > 0 ? "goa-divider" : ""}`}>
+              <div className="flex items-center justify-between">
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm truncate">{it.name}</div>
+                  <div className="goa-mono text-xs" style={{ color: "var(--ink-soft)" }}>{currency(it.price)}</div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button onClick={() => changeQty(it.id, -1)} className="goa-stepper-btn rounded-full w-7 h-7 flex items-center justify-center">
+                    <Minus size={13} />
+                  </button>
+                  <span className="goa-mono font-bold w-5 text-center">{myQty[it.id] || 0}</span>
+                  <button onClick={() => changeQty(it.id, 1)} className="goa-stepper-btn rounded-full w-7 h-7 flex items-center justify-center">
+                    <Plus size={13} />
+                  </button>
+                </div>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <button onClick={() => changeQty(it.id, -1)} className="goa-stepper-btn rounded-full w-7 h-7 flex items-center justify-center">
-                  <Minus size={13} />
-                </button>
-                <span className="goa-mono font-bold w-5 text-center">{myQty[it.id] || 0}</span>
-                <button onClick={() => changeQty(it.id, 1)} className="goa-stepper-btn rounded-full w-7 h-7 flex items-center justify-center">
-                  <Plus size={13} />
-                </button>
-              </div>
+              {(myQty[it.id] || 0) > 0 && (
+                <input
+                  value={myNotes[it.id] || ""}
+                  onChange={(e) => setMyNotes((prev) => ({ ...prev, [it.id]: e.target.value }))}
+                  placeholder="備註（例如：少冰半糖、加辣、不要湯）"
+                  className="goa-input w-full rounded-lg px-2.5 py-1.5 text-xs mt-1.5"
+                  maxLength={40}
+                />
+              )}
             </div>
           ))}
           <div className="goa-divider pt-3 flex items-center justify-between">
@@ -1283,7 +1297,7 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile }) {
                   <span className="goa-mono font-bold text-sm">{currency(order.total)}</span>
                 </div>
                 <div className="text-xs mt-0.5" style={{ color: "var(--ink-soft)" }}>
-                  {(order.items || []).map((it) => `${it.name}×${it.qty}`).join("、")}
+                  {(order.items || []).map((it) => it.note ? `${it.name}×${it.qty}（${it.note}）` : `${it.name}×${it.qty}`).join("、")}
                 </div>
               </div>
             ))
