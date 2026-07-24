@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
-  Plus, Minus, ChevronLeft, Loader2, Users, Receipt,
+  Plus, Minus, ChevronLeft, ChevronDown, Loader2, Users, Receipt,
   Check, Store, RefreshCw, Eye, EyeOff, AlertCircle, Sparkles,
   UserRound, Lock, ImagePlus, Trash2, PencilLine, Wallet, QrCode,
   Circle, CheckCircle2, Share2, Upload,
@@ -559,41 +559,34 @@ function UploadMenuFlow({ onBack, onSaved, existingMenu }) {
                 </button>
               </div>
               <div className="flex flex-col gap-3">
-                {groupItemsByCategory(items).map((group) => (
-                  <div key={group.category} className="flex flex-col gap-2">
-                    {groupItemsByCategory(items).length > 1 && (
-                      <div className="text-xs font-black" style={{ color: "var(--stamp)" }}>{group.category}</div>
-                    )}
-                    {group.items.map((it) => (
-                      <div key={it.id} className="flex flex-col gap-1">
-                        <div className="flex items-center gap-2">
-                          <input
-                            value={it.name}
-                            onChange={(e) => updateItem(it.id, { name: e.target.value })}
-                            placeholder="品項名稱"
-                            className="goa-input flex-1 rounded-lg px-2.5 py-2 text-sm"
-                          />
-                          <input
-                            value={it.price}
-                            onChange={(e) => updateItem(it.id, { price: e.target.value.replace(/[^0-9]/g, "") })}
-                            inputMode="numeric"
-                            placeholder="0"
-                            className="goa-input goa-mono rounded-lg px-2.5 py-2 text-sm text-right"
-                            style={{ width: 76 }}
-                          />
-                          <button onClick={() => removeItem(it.id)} className="p-1.5 shrink-0" style={{ color: "var(--ink-soft)" }}>
-                            <Trash2 size={15} />
-                          </button>
-                        </div>
-                        <input
-                          value={it.category || ""}
-                          onChange={(e) => updateItem(it.id, { category: e.target.value })}
-                          placeholder="分類（例如：漢堡類、飲料類，選填）"
-                          className="goa-input rounded-lg px-2.5 py-1 text-xs"
-                          style={{ color: "var(--ink-soft)", maxWidth: 220 }}
-                        />
-                      </div>
-                    ))}
+                {items.map((it) => (
+                  <div key={it.id} className="flex flex-col gap-1">
+                    <div className="flex items-center gap-2">
+                      <input
+                        value={it.name}
+                        onChange={(e) => updateItem(it.id, { name: e.target.value })}
+                        placeholder="品項名稱"
+                        className="goa-input flex-1 rounded-lg px-2.5 py-2 text-sm"
+                      />
+                      <input
+                        value={it.price}
+                        onChange={(e) => updateItem(it.id, { price: e.target.value.replace(/[^0-9]/g, "") })}
+                        inputMode="numeric"
+                        placeholder="0"
+                        className="goa-input goa-mono rounded-lg px-2.5 py-2 text-sm text-right"
+                        style={{ width: 76 }}
+                      />
+                      <button onClick={() => removeItem(it.id)} className="p-1.5 shrink-0" style={{ color: "var(--ink-soft)" }}>
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                    <input
+                      value={it.category || ""}
+                      onChange={(e) => updateItem(it.id, { category: e.target.value })}
+                      placeholder="分類（例如：漢堡類、飲料類，選填）"
+                      className="goa-input rounded-lg px-2.5 py-1 text-xs"
+                      style={{ color: "var(--ink-soft)", maxWidth: 220 }}
+                    />
                   </div>
                 ))}
                 {items.length === 0 && (
@@ -625,7 +618,17 @@ function MenuDetail({ menuId, onBack, onGroupCreated, onUpdateMenu }) {
   const [groupName, setGroupName] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [showPhoto, setShowPhoto] = useState(false);
+  const [expandedCats, setExpandedCats] = useState(() => new Set());
   const me = useRef(null);
+
+  const toggleCat = (cat) => {
+    setExpandedCats((prev) => {
+      const next = new Set(prev);
+      if (next.has(cat)) next.delete(cat);
+      else next.add(cat);
+      return next;
+    });
+  };
 
   useEffect(() => {
     (async () => {
@@ -716,22 +719,41 @@ function MenuDetail({ menuId, onBack, onGroupCreated, onUpdateMenu }) {
           </div>
         )}
         <div className="goa-card p-4">
-          {groupItemsByCategory(menu.items).map((group, gi) => {
-            const showHeaders = groupItemsByCategory(menu.items).length > 1;
-            return (
-              <div key={group.category} className={gi > 0 ? "goa-divider pt-3 mt-3" : ""}>
-                {showHeaders && (
-                  <div className="text-xs font-black mb-1.5" style={{ color: "var(--stamp)" }}>{group.category}</div>
-                )}
-                {group.items.map((it, i) => (
-                  <div key={it.id} className={`flex items-center justify-between py-2.5 ${i > 0 ? "goa-divider" : ""}`}>
-                    <span className="text-sm">{it.name}</span>
-                    <span className="goa-mono font-bold text-sm">{currency(it.price)}</span>
-                  </div>
-                ))}
-              </div>
-            );
-          })}
+          {(() => {
+            const groups = groupItemsByCategory(menu.items);
+            const showHeaders = groups.length > 1;
+            return groups.map((group, gi) => {
+              const isOpen = !showHeaders || expandedCats.has(group.category);
+              return (
+                <div key={group.category} className={gi > 0 ? "goa-divider pt-2 mt-2" : ""}>
+                  {showHeaders ? (
+                    <button
+                      onClick={() => toggleCat(group.category)}
+                      className="flex items-center justify-between w-full py-1"
+                    >
+                      <span className="text-sm font-black" style={{ color: "var(--stamp)" }}>
+                        {group.category}<span className="font-normal" style={{ color: "var(--ink-soft)" }}> （{group.items.length}）</span>
+                      </span>
+                      <ChevronDown
+                        size={16}
+                        style={{ color: "var(--ink-soft)", transform: isOpen ? "rotate(180deg)" : "none", transition: "transform .15s ease" }}
+                      />
+                    </button>
+                  ) : null}
+                  {isOpen && (
+                    <div className={showHeaders ? "mt-1.5" : ""}>
+                      {group.items.map((it, i) => (
+                        <div key={it.id} className={`flex items-center justify-between py-2.5 ${i > 0 ? "goa-divider" : ""}`}>
+                          <span className="text-sm">{it.name}</span>
+                          <span className="goa-mono font-bold text-sm">{currency(it.price)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            });
+          })()}
         </div>
       </div>
 
@@ -1126,8 +1148,18 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile }) {
   const [shareStatus, setShareStatus] = useState("idle");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [expandedCats, setExpandedCats] = useState(() => new Set());
   const menuRef = useRef(null);
   const pollRef = useRef(null);
+
+  const toggleCat = (cat) => {
+    setExpandedCats((prev) => {
+      const next = new Set(prev);
+      if (next.has(cat)) next.delete(cat);
+      else next.add(cat);
+      return next;
+    });
+  };
 
   const fetchAll = useCallback(async (initQty) => {
     try {
@@ -1146,6 +1178,15 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile }) {
         (mine?.items || []).forEach((it) => { q[it.itemId] = it.qty; n[it.itemId] = it.note || ""; });
         setMyQty(q);
         setMyNotes(n);
+        const menuData = menuRef.current;
+        if (menuData && mine?.items?.length) {
+          const orderedIds = new Set(mine.items.map((it) => it.itemId));
+          const catsToExpand = new Set();
+          menuData.items.forEach((it) => {
+            if (orderedIds.has(it.id)) catsToExpand.add((it.category || "").trim() || "其他");
+          });
+          setExpandedCats(catsToExpand);
+        }
       }
     } catch (e) {
       setError(e.message || "讀取失敗");
@@ -1297,41 +1338,69 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile }) {
       <div className="px-4 flex flex-col gap-4">
         <div className="goa-card p-4">
           <div className="text-xs font-bold mb-2" style={{ color: "var(--ink-soft)" }}>我要點的餐</div>
-          {groupedMenuItems.map((group, gi) => (
-            <div key={group.category} className={gi > 0 ? "goa-divider pt-3 mt-3" : ""}>
-              {showMenuCategoryHeaders && (
-                <div className="text-xs font-black mb-1.5" style={{ color: "var(--stamp)" }}>{group.category}</div>
-              )}
-              {group.items.map((it, i) => (
-                <div key={it.id} className={`py-2.5 ${i > 0 ? "goa-divider" : ""}`}>
-                  <div className="flex items-center justify-between">
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm truncate">{it.name}</div>
-                      <div className="goa-mono text-xs" style={{ color: "var(--ink-soft)" }}>{currency(it.price)}</div>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <button onClick={() => changeQty(it.id, -1)} className="goa-stepper-btn rounded-full w-7 h-7 flex items-center justify-center">
-                        <Minus size={13} />
-                      </button>
-                      <span className="goa-mono font-bold w-5 text-center">{myQty[it.id] || 0}</span>
-                      <button onClick={() => changeQty(it.id, 1)} className="goa-stepper-btn rounded-full w-7 h-7 flex items-center justify-center">
-                        <Plus size={13} />
-                      </button>
-                    </div>
-                  </div>
-                  {(myQty[it.id] || 0) > 0 && (
-                    <input
-                      value={myNotes[it.id] || ""}
-                      onChange={(e) => setMyNotes((prev) => ({ ...prev, [it.id]: e.target.value }))}
-                      placeholder="備註（例如：少冰半糖、加辣、不要湯）"
-                      className="goa-input w-full rounded-lg px-2.5 py-1.5 text-xs mt-1.5"
-                      maxLength={40}
+          {groupedMenuItems.map((group, gi) => {
+            const isOpen = !showMenuCategoryHeaders || expandedCats.has(group.category);
+            const pickedCount = group.items.reduce((s, it) => s + (myQty[it.id] || 0), 0);
+            return (
+              <div key={group.category} className={gi > 0 ? "goa-divider pt-2 mt-2" : ""}>
+                {showMenuCategoryHeaders ? (
+                  <button
+                    onClick={() => toggleCat(group.category)}
+                    className="flex items-center justify-between w-full py-1"
+                  >
+                    <span className="text-sm font-black flex items-center gap-1.5" style={{ color: "var(--stamp)" }}>
+                      {group.category}
+                      <span className="font-normal" style={{ color: "var(--ink-soft)" }}>（{group.items.length}）</span>
+                      {pickedCount > 0 && (
+                        <span
+                          className="text-xs font-bold px-1.5 py-0.5 rounded-full"
+                          style={{ background: "var(--till-bg)", color: "var(--till)" }}
+                        >
+                          已選 {pickedCount}
+                        </span>
+                      )}
+                    </span>
+                    <ChevronDown
+                      size={16}
+                      style={{ color: "var(--ink-soft)", transform: isOpen ? "rotate(180deg)" : "none", transition: "transform .15s ease" }}
                     />
-                  )}
-                </div>
-              ))}
-            </div>
-          ))}
+                  </button>
+                ) : null}
+                {isOpen && (
+                  <div className={showMenuCategoryHeaders ? "mt-1.5" : ""}>
+                    {group.items.map((it, i) => (
+                      <div key={it.id} className={`py-2.5 ${i > 0 ? "goa-divider" : ""}`}>
+                        <div className="flex items-center justify-between">
+                          <div className="min-w-0 flex-1">
+                            <div className="text-sm truncate">{it.name}</div>
+                            <div className="goa-mono text-xs" style={{ color: "var(--ink-soft)" }}>{currency(it.price)}</div>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button onClick={() => changeQty(it.id, -1)} className="goa-stepper-btn rounded-full w-7 h-7 flex items-center justify-center">
+                              <Minus size={13} />
+                            </button>
+                            <span className="goa-mono font-bold w-5 text-center">{myQty[it.id] || 0}</span>
+                            <button onClick={() => changeQty(it.id, 1)} className="goa-stepper-btn rounded-full w-7 h-7 flex items-center justify-center">
+                              <Plus size={13} />
+                            </button>
+                          </div>
+                        </div>
+                        {(myQty[it.id] || 0) > 0 && (
+                          <input
+                            value={myNotes[it.id] || ""}
+                            onChange={(e) => setMyNotes((prev) => ({ ...prev, [it.id]: e.target.value }))}
+                            placeholder="備註（例如：少冰半糖、加辣、不要湯）"
+                            className="goa-input w-full rounded-lg px-2.5 py-1.5 text-xs mt-1.5"
+                            maxLength={40}
+                          />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
           <div className="goa-divider pt-3 flex items-center justify-between">
             <span className="text-sm font-bold">我的小計</span>
             <span className="goa-mono font-black text-lg" style={{ color: "var(--stamp)" }}>{currency(myTotal)}</span>
