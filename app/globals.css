@@ -1,0 +1,66 @@
+@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@600;700;900&family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@500;700&display=swap');
+@import "tailwindcss";
+
+html, body {
+  background: #EDE7D9;
+}
+
+.goa-root {
+  --paper: #EDE7D9;
+  --card: #FFFDF8;
+  --ink: #2B2620;
+  --ink-soft: #82785F;
+  --stamp: #C23B2E;
+  --stamp-dark: #9C2E23;
+  --till: #3F6B4A;
+  --till-bg: #E4ECE1;
+  --gold: #D99A2B;
+  --line: #D5CBB4;
+  font-family: 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+  color: var(--ink);
+  background: var(--paper);
+  min-height: 100vh;
+}
+.goa-display { font-family: 'Noto Serif TC', 'PingFang TC', serif; }
+.goa-mono { font-family: 'JetBrains Mono', 'Courier New', monospace; }
+.goa-card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; }
+.goa-divider { border-top: 1px dashed var(--line); }
+.goa-btn-primary { background: var(--stamp); color: #FFF7EF; transition: transform .12s ease, background .12s ease; }
+.goa-btn-primary:active { background: var(--stamp-dark); transform: scale(0.97); }
+.goa-btn-primary:disabled { opacity: .45; }
+.goa-btn-outline { background: transparent; border: 1.5px solid var(--ink); color: var(--ink); }
+.goa-btn-outline:active { transform: scale(0.97); }
+.goa-input { background: var(--card); border: 1.5px solid var(--line); color: var(--ink); }
+.goa-input:focus { outline: none; border-color: var(--stamp); }
+.goa-stepper-btn { border: 1.5px solid var(--ink); }
+.goa-stepper-btn:active { transform: scale(0.92); }
+.receipt-ticket { position: relative; background: var(--card); }
+.receipt-ticket::before, .receipt-ticket::after {
+  content: ""; position: absolute; left: 0; right: 0; height: 9px;
+  background-image: radial-gradient(circle at 8px 8px, var(--paper) 8px, transparent 8.5px);
+  background-size: 16px 16px; background-repeat: repeat-x;
+}
+.receipt-ticket::before { top: -8px; background-position: 0 100%; }
+.receipt-ticket::after { bottom: -8px; background-position: 0 -8px; }
+.stamp-badge {
+  display: inline-block; border: 3px solid var(--stamp); color: var(--stamp);
+  padding: 2px 14px; border-radius: 6px; transform: rotate(-7deg);
+  font-weight: 900; letter-spacing: 3px; opacity: .9;
+}
+.goa-logo {
+  width: 40px; height: 40px; border-radius: 999px; border: 2.5px solid var(--stamp);
+  color: var(--stamp); display: flex; align-items: center; justify-content: center;
+  font-weight: 900; font-size: 18px; transform: rotate(-6deg); flex-shrink: 0;
+}
+@keyframes goa-pop { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+.goa-pop { animation: goa-pop .18s ease-out; }
+.goa-pulse-dot {
+  width: 7px; height: 7px; border-radius: 999px; background: #FFFFFF; flex-shrink: 0;
+  box-shadow: 0 0 0 0 rgba(255,255,255,0.6);
+  animation: goa-pulse 1.6s infinite;
+}
+@keyframes goa-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(255,255,255,0.6); }
+  70% { box-shadow: 0 0 0 6px rgba(255,255,255,0); }
+  100% { box-shadow: 0 0 0 0 rgba(255,255,255,0); }
+}
