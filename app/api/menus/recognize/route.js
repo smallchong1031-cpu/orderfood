@@ -4,6 +4,50 @@ import { withErrorHandling, jsonError } from "@/lib/apiHelpers";
 // 選用模型：claude-sonnet-5 準確度較高；claude-haiku-4-5-20251001 較便宜、速度較快。
 const MODEL = "claude-sonnet-5";
 
+// 如果 AI 回應在寫到一半時被 max_tokens 截斷，嘗試把已經完整寫完的品項救回來，
+// 而不是整份辨識直接失敗（品項很多的大菜單常常會遇到這種狀況）。
+function tryRepairTruncatedMenu(raw) {
+  const itemsIdx = raw.indexOf('"items"');
+  if (itemsIdx === -1) return null;
+  const arrStart = raw.indexOf("[", itemsIdx);
+  if (arrStart === -1) return null;
+
+  let storeName = null;
+  const storeNameMatch = raw.match(/"storeName"\s*:\s*("(?:[^"\\]|\\.)*"|null)/);
+  if (storeNameMatch) {
+    try {
+      storeName = JSON.parse(storeNameMatch[1]);
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  const items = [];
+  let depth = 0;
+  let objStart = -1;
+  for (let i = arrStart; i < raw.length; i++) {
+    const ch = raw[i];
+    if (ch === "{") {
+      if (depth === 0) objStart = i;
+      depth++;
+    } else if (ch === "}") {
+      depth--;
+      if (depth === 0 && objStart !== -1) {
+        const objStr = raw.slice(objStart, i + 1);
+        try {
+          const obj = JSON.parse(objStr);
+          if (obj && typeof obj.name === "string") items.push(obj);
+        } catch (e) {
+          // 這個物件被截斷、解析失敗，就跳過不救
+        }
+        objStart = -1;
+      }
+    }
+  }
+  if (items.length === 0) return null;
+  return { storeName, items, truncated: true };
+}
+
 export async function POST(request) {
   return withErrorHandling(async () => {
     const { base64, mediaType } = await request.json();
@@ -23,7 +67,8 @@ export async function POST(request) {
       },
       body: JSON.stringify({
         model: MODEL,
-        max_tokens: 4096,
+        max_tokens: 16000,
+        thinking: { type: "disabled" },
         system:
           '你是菜單辨識引擎。只能輸出純JSON物件，不可有任何前言、說明文字或markdown符號(例如```)。格式:{"storeName": 店名字串或null, "items": [{"name": 品項名稱, "price": 數字}]}。若同一品項有多種規格或價格(例如大杯/小杯、半份/全份)，請拆成多個獨立品項並在名稱後方註明規格。價格看不清楚或無法判斷時，不要加入該品項。金額只寫數字，不要加NT$或逗號或任何文字。',
         messages: [
@@ -66,6 +111,10 @@ export async function POST(request) {
     try {
       parsed = JSON.parse(clean);
     } catch (e) {
+      const repaired = tryRepairTruncatedMenu(textBlock.text);
+      if (repaired) {
+        return NextResponse.json(repaired);
+      }
       console.error("AI 回傳內容無法解析為 JSON，原始內容：", textBlock.text);
       return jsonError(
         `AI 回傳格式不是有效的 JSON。【除錯用】AI 原始回應：${textBlock.text.slice(0, 800)}`,
