@@ -51,14 +51,23 @@ export async function POST(request) {
     let clean = textBlock.text.trim();
     clean = clean.replace(/^```json/i, "").replace(/^```/, "").replace(/```$/, "").trim();
 
+    // 保險起見：如果 AI 在 JSON 前後多加了說明文字，抓出第一個 { 到最後一個 } 之間的內容再解析
+    const firstBrace = clean.indexOf("{");
+    const lastBrace = clean.lastIndexOf("}");
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+      clean = clean.slice(firstBrace, lastBrace + 1);
+    }
+
     let parsed;
     try {
       parsed = JSON.parse(clean);
     } catch (e) {
-      return jsonError("AI 回傳格式不是有效的 JSON", 502);
+      console.error("AI 回傳內容無法解析為 JSON，原始內容：", textBlock.text);
+      return jsonError("AI 回傳格式不是有效的 JSON，請重新拍照再試一次，或改用手動輸入品項", 502);
     }
     if (!parsed || !Array.isArray(parsed.items)) {
-      return jsonError("格式不符預期", 502);
+      console.error("AI 回傳的 JSON 缺少 items 陣列，原始內容：", textBlock.text);
+      return jsonError("格式不符預期，請重新拍照再試一次，或改用手動輸入品項", 502);
     }
     return NextResponse.json(parsed);
   });
