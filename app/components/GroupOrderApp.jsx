@@ -423,7 +423,6 @@ function MenuLibrary({ onOpenMenu, onUpload, refreshKey }) {
 function SortableItemRow({ item, updateItem, removeItem }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id });
   const [showOptions, setShowOptions] = useState(false);
-  const [choicesDraft, setChoicesDraft] = useState({}); // groupId -> 正在輸入中的原始文字（避免打字被重組打斷）
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -436,7 +435,7 @@ function SortableItemRow({ item, updateItem, removeItem }) {
   const optionGroups = item.optionGroups || [];
 
   const addOptionGroup = () => {
-    updateItem(item.id, { optionGroups: [...optionGroups, { id: uid("og"), name: "", choices: [] }] });
+    updateItem(item.id, { optionGroups: [...optionGroups, { id: uid("og"), name: "", choices: [], choicesText: "" }] });
     setShowOptions(true);
   };
   const updateOptionGroup = (groupId, patch) => {
@@ -444,22 +443,6 @@ function SortableItemRow({ item, updateItem, removeItem }) {
   };
   const removeOptionGroup = (groupId) => {
     updateItem(item.id, { optionGroups: optionGroups.filter((g) => g.id !== groupId) });
-    setChoicesDraft((prev) => {
-      const next = { ...prev };
-      delete next[groupId];
-      return next;
-    });
-  };
-  const commitChoices = (groupId) => {
-    const raw = choicesDraft[groupId];
-    if (raw === undefined) return;
-    const parsed = raw.split(/[,，、]/).map((s) => s.trim()).filter(Boolean);
-    updateOptionGroup(groupId, { choices: parsed });
-    setChoicesDraft((prev) => {
-      const next = { ...prev };
-      delete next[groupId];
-      return next;
-    });
   };
 
   return (
@@ -524,9 +507,8 @@ function SortableItemRow({ item, updateItem, removeItem }) {
                 </button>
               </div>
               <input
-                value={choicesDraft[group.id] !== undefined ? choicesDraft[group.id] : (group.choices || []).join("、")}
-                onChange={(e) => setChoicesDraft((prev) => ({ ...prev, [group.id]: e.target.value }))}
-                onBlur={() => commitChoices(group.id)}
+                value={group.choicesText !== undefined ? group.choicesText : (group.choices || []).join("、")}
+                onChange={(e) => updateOptionGroup(group.id, { choicesText: e.target.value })}
                 placeholder="選項內容，用頓號分隔，例如：豬肉、牛肉、雞肉"
                 className="goa-input rounded-lg px-2 py-1.5 text-xs"
               />
@@ -622,7 +604,19 @@ function UploadMenuFlow({ onBack, onSaved, existingMenu }) {
     const payload = {
       storeName: storeName.trim(),
       storePhone: storePhone.trim(),
-      items: items.map((it) => ({ id: it.id, name: it.name.trim(), price: Number(it.price) || 0, category: (it.category || "").trim() })),
+      items: items.map((it) => ({
+        id: it.id,
+        name: it.name.trim(),
+        price: Number(it.price) || 0,
+        category: (it.category || "").trim(),
+        optionGroups: (it.optionGroups || [])
+          .map((g) => {
+            const rawText = g.choicesText !== undefined ? g.choicesText : (g.choices || []).join("、");
+            const choices = rawText.split(/[,，、]/).map((s) => s.trim()).filter(Boolean);
+            return { id: g.id, name: (g.name || "").trim(), choices };
+          })
+          .filter((g) => g.choices.length > 0),
+      })),
       image: preview || existingMenu?.image || null,
     };
     try {
