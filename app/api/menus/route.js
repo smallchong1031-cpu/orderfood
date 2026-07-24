@@ -16,12 +16,13 @@ export async function POST(request) {
     const storeName = (body.storeName || "").trim();
     const items = Array.isArray(body.items) ? body.items : [];
     const image = body.image || null;
+    const storePhone = (body.storePhone || "").trim() || null;
     if (!storeName || items.length === 0) {
       return jsonError("店名與品項不可為空", 400);
     }
     const rows = await sql`
-      insert into menus (store_name, items, image)
-      values (${storeName}, ${JSON.stringify(items)}::jsonb, ${image})
+      insert into menus (store_name, items, image, store_phone)
+      values (${storeName}, ${JSON.stringify(items)}::jsonb, ${image}, ${storePhone})
       returning *
     `;
     return NextResponse.json(mapMenu(rows[0]));

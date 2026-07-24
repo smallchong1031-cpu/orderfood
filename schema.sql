@@ -7,6 +7,8 @@ create table if not exists menus (
   id uuid primary key default gen_random_uuid(),
   store_name text not null,
   items jsonb not null default '[]'::jsonb,
+  image text,
+  store_phone text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );

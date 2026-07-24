@@ -1,11 +1,19 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { useRouter } from "next/navigation";
+import {
+  DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors,
+} from "@dnd-kit/core";
+import {
+  SortableContext, verticalListSortingStrategy, useSortable, arrayMove,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import {
   Plus, Minus, ChevronLeft, ChevronDown, Loader2, Users, Receipt,
   Check, Store, RefreshCw, Eye, EyeOff, AlertCircle, Sparkles,
   UserRound, Lock, ImagePlus, Trash2, PencilLine, Wallet, QrCode,
-  Circle, CheckCircle2, Share2, Upload,
+  Circle, CheckCircle2, Share2, Upload, Phone, GripVertical,
 } from "lucide-react";
 import { api } from "./api";
 import { getMyName, setMyName } from "./identity";
@@ -400,6 +408,59 @@ function MenuLibrary({ onOpenMenu, onUpload, refreshKey }) {
   );
 }
 
+/* ============================== Sortable item row (menu edit) ============================== */
+
+function SortableItemRow({ item, updateItem, removeItem }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    zIndex: isDragging ? 10 : "auto",
+    position: "relative",
+    background: isDragging ? "var(--card)" : "transparent",
+  };
+  return (
+    <div ref={setNodeRef} style={style} className="flex flex-col gap-1">
+      <div className="flex items-center gap-1.5">
+        <button
+          {...attributes}
+          {...listeners}
+          className="p-1 shrink-0 touch-none"
+          style={{ color: "var(--ink-soft)", cursor: "grab" }}
+          aria-label="拖曳排序"
+        >
+          <GripVertical size={16} />
+        </button>
+        <input
+          value={item.name}
+          onChange={(e) => updateItem(item.id, { name: e.target.value })}
+          placeholder="品項名稱"
+          className="goa-input flex-1 rounded-lg px-2.5 py-2 text-sm"
+        />
+        <input
+          value={item.price}
+          onChange={(e) => updateItem(item.id, { price: e.target.value.replace(/[^0-9]/g, "") })}
+          inputMode="numeric"
+          placeholder="0"
+          className="goa-input goa-mono rounded-lg px-2.5 py-2 text-sm text-right"
+          style={{ width: 76 }}
+        />
+        <button onClick={() => removeItem(item.id)} className="p-1.5 shrink-0" style={{ color: "var(--ink-soft)" }}>
+          <Trash2 size={15} />
+        </button>
+      </div>
+      <input
+        value={item.category || ""}
+        onChange={(e) => updateItem(item.id, { category: e.target.value })}
+        placeholder="分類（例如：漢堡類、飲料類，選填）"
+        className="goa-input rounded-lg px-2.5 py-1 text-xs ml-6"
+        style={{ color: "var(--ink-soft)", maxWidth: 220 }}
+      />
+    </div>
+  );
+}
+
 /* ============================== Upload Flow ============================== */
 
 function UploadMenuFlow({ onBack, onSaved, existingMenu }) {
@@ -410,6 +471,7 @@ function UploadMenuFlow({ onBack, onSaved, existingMenu }) {
   const [error, setError] = useState("");
   const [warning, setWarning] = useState("");
   const [storeName, setStoreName] = useState(existingMenu?.storeName || "");
+  const [storePhone, setStorePhone] = useState(existingMenu?.storePhone || "");
   const [items, setItems] = useState(existingMenu ? existingMenu.items.map((it) => ({ ...it })) : []);
   const [saving, setSaving] = useState(false);
   const fileInputRef = useRef(null);
@@ -434,6 +496,7 @@ function UploadMenuFlow({ onBack, onSaved, existingMenu }) {
     try {
       const result = await api.recognizeMenu({ base64: pending.base64, mediaType: pending.mediaType });
       setStoreName((prev) => result.storeName || prev);
+      setStorePhone((prev) => result.storePhone || prev);
       setItems(
         (result.items || []).map((it) => ({
           id: uid("it"),
@@ -456,6 +519,21 @@ function UploadMenuFlow({ onBack, onSaved, existingMenu }) {
   const removeItem = (id) => setItems((prev) => prev.filter((it) => it.id !== id));
   const addBlankItem = () => setItems((prev) => [...prev, { id: uid("it"), name: "", price: 0, category: "" }]);
 
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 6 } })
+  );
+  const handleDragEnd = (event) => {
+    const { active, over } = event;
+    if (over && active.id !== over.id) {
+      setItems((prev) => {
+        const oldIndex = prev.findIndex((i) => i.id === active.id);
+        const newIndex = prev.findIndex((i) => i.id === over.id);
+        return arrayMove(prev, oldIndex, newIndex);
+      });
+    }
+  };
+
   const canSave = storeName.trim() && items.length > 0 && items.every((it) => it.name.trim());
 
   const save = async () => {
@@ -463,6 +541,7 @@ function UploadMenuFlow({ onBack, onSaved, existingMenu }) {
     setError("");
     const payload = {
       storeName: storeName.trim(),
+      storePhone: storePhone.trim(),
       items: items.map((it) => ({ id: it.id, name: it.name.trim(), price: Number(it.price) || 0, category: (it.category || "").trim() })),
       image: preview || existingMenu?.image || null,
     };
@@ -551,6 +630,16 @@ function UploadMenuFlow({ onBack, onSaved, existingMenu }) {
                 className="goa-input w-full rounded-xl px-3 py-2 mt-1"
               />
             </div>
+            <div>
+              <label className="text-xs font-bold" style={{ color: "var(--ink-soft)" }}>店家電話（選填，打電話訂餐用）</label>
+              <input
+                value={storePhone}
+                onChange={(e) => setStorePhone(e.target.value)}
+                placeholder="例如：089-358538"
+                className="goa-input w-full rounded-xl px-3 py-2 mt-1"
+                inputMode="tel"
+              />
+            </div>
             <div className="goa-divider pt-3">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-bold" style={{ color: "var(--ink-soft)" }}>品項與金額（可修改）</span>
@@ -558,41 +647,18 @@ function UploadMenuFlow({ onBack, onSaved, existingMenu }) {
                   <Plus size={13} /> 新增品項
                 </button>
               </div>
-              <div className="flex flex-col gap-3">
-                {items.map((it) => (
-                  <div key={it.id} className="flex flex-col gap-1">
-                    <div className="flex items-center gap-2">
-                      <input
-                        value={it.name}
-                        onChange={(e) => updateItem(it.id, { name: e.target.value })}
-                        placeholder="品項名稱"
-                        className="goa-input flex-1 rounded-lg px-2.5 py-2 text-sm"
-                      />
-                      <input
-                        value={it.price}
-                        onChange={(e) => updateItem(it.id, { price: e.target.value.replace(/[^0-9]/g, "") })}
-                        inputMode="numeric"
-                        placeholder="0"
-                        className="goa-input goa-mono rounded-lg px-2.5 py-2 text-sm text-right"
-                        style={{ width: 76 }}
-                      />
-                      <button onClick={() => removeItem(it.id)} className="p-1.5 shrink-0" style={{ color: "var(--ink-soft)" }}>
-                        <Trash2 size={15} />
-                      </button>
-                    </div>
-                    <input
-                      value={it.category || ""}
-                      onChange={(e) => updateItem(it.id, { category: e.target.value })}
-                      placeholder="分類（例如：漢堡類、飲料類，選填）"
-                      className="goa-input rounded-lg px-2.5 py-1 text-xs"
-                      style={{ color: "var(--ink-soft)", maxWidth: 220 }}
-                    />
+              <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                <SortableContext items={items.map((it) => it.id)} strategy={verticalListSortingStrategy}>
+                  <div className="flex flex-col gap-3">
+                    {items.map((it) => (
+                      <SortableItemRow key={it.id} item={it} updateItem={updateItem} removeItem={removeItem} />
+                    ))}
+                    {items.length === 0 && (
+                      <div className="text-sm text-center py-4" style={{ color: "var(--ink-soft)" }}>尚無品項，請先辨識或手動新增</div>
+                    )}
                   </div>
-                ))}
-                {items.length === 0 && (
-                  <div className="text-sm text-center py-4" style={{ color: "var(--ink-soft)" }}>尚無品項，請先辨識或手動新增</div>
-                )}
-              </div>
+                </SortableContext>
+              </DndContext>
             </div>
             <button
               onClick={save}
@@ -635,7 +701,7 @@ function MenuDetail({ menuId, onBack, onGroupCreated, onUpdateMenu }) {
       try {
         const doc = await api.getMenu(menuId);
         setMenu(doc);
-        if (doc) setGroupName(`${doc.storeName} 午餐揪團`);
+        if (doc) setGroupName(`${doc.storeName} 揪團`);
       } catch (e) {
         setError(e.message || "讀取失敗");
       }
@@ -696,6 +762,17 @@ function MenuDetail({ menuId, onBack, onGroupCreated, onUpdateMenu }) {
         }
       />
       <div className="px-4 flex flex-col gap-3">
+        {menu.storePhone && (
+          <a
+            href={`tel:${menu.storePhone.replace(/[^0-9+]/g, "")}`}
+            className="goa-card p-3 flex items-center justify-between"
+          >
+            <span className="flex items-center gap-2 text-sm font-bold">
+              <Phone size={15} style={{ color: "var(--stamp)" }} /> {menu.storePhone}
+            </span>
+            <span className="text-xs font-bold" style={{ color: "var(--stamp)" }}>點此撥打</span>
+          </a>
+        )}
         {menu.image && (
           <div className="goa-card p-3">
             <button
@@ -1322,10 +1399,24 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile }) {
           </div>
         </div>
       )}
-      <div className="px-4 flex items-center gap-2 mb-4 flex-wrap">
+      <div className="px-4 flex items-center gap-2 mb-3 flex-wrap">
         <StatusChip status={group.status} />
         <span className="text-xs" style={{ color: "var(--ink-soft)" }}>{members.length} 人已點餐</span>
       </div>
+
+      {menu.storePhone && (
+        <div className="px-4 mb-4">
+          <a
+            href={`tel:${menu.storePhone.replace(/[^0-9+]/g, "")}`}
+            className="goa-card p-3 flex items-center justify-between"
+          >
+            <span className="flex items-center gap-2 text-sm font-bold">
+              <Phone size={15} style={{ color: "var(--stamp)" }} /> {menu.storePhone}
+            </span>
+            <span className="text-xs font-bold" style={{ color: "var(--stamp)" }}>點此撥打訂餐</span>
+          </a>
+        </div>
+      )}
 
       {error && (
         <div className="px-4 mb-4">
@@ -1495,16 +1586,26 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile }) {
 
 /* ============================== App Root ============================== */
 
-export default function GroupOrderApp() {
+export default function GroupOrderApp({ initialNav }) {
   const [me, setMe] = useState(undefined);
-  const [nav, setNav] = useState({ screen: "home", tab: "menus" });
+  const [nav, setNav] = useState(initialNav || { screen: "home", tab: "menus" });
   const [refreshKey, setRefreshKey] = useState(0);
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
+  const router = useRouter();
 
   useEffect(() => {
     setMe(getMyName());
   }, []);
+
+  // 把目前畫面同步到網址列：看揪團時網址變成 /groups/{id}，其他畫面則回到首頁網址。
+  // 這樣「分享」複製的網址，才會是真正連到那一團、而不是永遠都是首頁。
+  useEffect(() => {
+    const path = nav.screen === "group" && nav.groupId ? `/groups/${nav.groupId}` : "/";
+    if (typeof window !== "undefined" && window.location.pathname !== path) {
+      router.replace(path, { scroll: false });
+    }
+  }, [nav.screen, nav.groupId, router]);
 
   const openSwitchIdentity = () => {
     setNameDraft(me || "");
