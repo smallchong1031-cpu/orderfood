@@ -23,7 +23,7 @@ export async function POST(request) {
       },
       body: JSON.stringify({
         model: MODEL,
-        max_tokens: 1000,
+        max_tokens: 4096,
         system:
           '你是菜單辨識引擎。只能輸出純JSON物件，不可有任何前言、說明文字或markdown符號(例如```)。格式:{"storeName": 店名字串或null, "items": [{"name": 品項名稱, "price": 數字}]}。若同一品項有多種規格或價格(例如大杯/小杯、半份/全份)，請拆成多個獨立品項並在名稱後方註明規格。價格看不清楚或無法判斷時，不要加入該品項。金額只寫數字，不要加NT$或逗號或任何文字。',
         messages: [
