@@ -46,7 +46,11 @@ export async function POST(request) {
     const data = await response.json();
     const textBlock = (data.content || []).find((b) => b.type === "text");
     if (!textBlock || !textBlock.text) {
-      return jsonError("AI 沒有回傳可用內容", 502);
+      console.error("Anthropic 回應沒有文字內容，完整回應：", JSON.stringify(data));
+      return jsonError(
+        `AI 沒有回傳可用內容。【除錯用】完整回應：${JSON.stringify(data).slice(0, 800)}`,
+        502
+      );
     }
     let clean = textBlock.text.trim();
     clean = clean.replace(/^```json/i, "").replace(/^```/, "").replace(/```$/, "").trim();
