@@ -388,7 +388,7 @@ function MenuLibrary({ onOpenMenu, onUpload, refreshKey }) {
 
 function UploadMenuFlow({ onBack, onSaved, existingMenu }) {
   const isEditMode = !!existingMenu;
-  const [preview, setPreview] = useState(null);
+  const [preview, setPreview] = useState(existingMenu?.image || null);
   const [pending, setPending] = useState(null);
   const [recognizing, setRecognizing] = useState(false);
   const [error, setError] = useState("");
@@ -442,6 +442,7 @@ function UploadMenuFlow({ onBack, onSaved, existingMenu }) {
     const payload = {
       storeName: storeName.trim(),
       items: items.map((it) => ({ id: it.id, name: it.name.trim(), price: Number(it.price) || 0 })),
+      image: preview || existingMenu?.image || null,
     };
     try {
       const saved = existingMenu ? await api.updateMenu(existingMenu.id, payload) : await api.createMenu(payload);
@@ -480,6 +481,9 @@ function UploadMenuFlow({ onBack, onSaved, existingMenu }) {
         ) : (
           <div className="goa-card p-3 flex flex-col gap-3">
             <img src={preview} alt="菜單預覽" className="w-full rounded-xl object-cover" style={{ maxHeight: 260, objectFit: "contain" }} />
+            {!pending && (
+              <div className="text-xs" style={{ color: "var(--ink-soft)" }}>這是先前儲存的照片，如果要重新辨識，請先點「重新選擇照片」上傳一張新的。</div>
+            )}
             <div className="flex gap-2">
               <button
                 onClick={() => { setPreview(null); setPending(null); setError(""); }}
@@ -489,7 +493,7 @@ function UploadMenuFlow({ onBack, onSaved, existingMenu }) {
               </button>
               <button
                 onClick={runRecognition}
-                disabled={recognizing}
+                disabled={recognizing || !pending}
                 className="goa-btn-primary rounded-xl px-3 py-2 text-sm font-bold flex-1 flex items-center justify-center gap-1.5"
               >
                 {recognizing ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
@@ -575,6 +579,7 @@ function MenuDetail({ menuId, onBack, onGroupCreated, onUpdateMenu }) {
   const [creating, setCreating] = useState(false);
   const [groupName, setGroupName] = useState("");
   const [showCreate, setShowCreate] = useState(false);
+  const [showPhoto, setShowPhoto] = useState(false);
   const me = useRef(null);
 
   useEffect(() => {
@@ -642,7 +647,29 @@ function MenuDetail({ menuId, onBack, onGroupCreated, onUpdateMenu }) {
           </button>
         }
       />
-      <div className="px-4">
+      <div className="px-4 flex flex-col gap-3">
+        {menu.image && (
+          <div className="goa-card p-3">
+            <button
+              onClick={() => setShowPhoto((v) => !v)}
+              className="flex items-center justify-between w-full text-xs font-bold"
+              style={{ color: "var(--ink-soft)" }}
+            >
+              <span className="flex items-center gap-1.5">
+                <ImagePlus size={13} /> 原始菜單照片
+              </span>
+              {showPhoto ? <EyeOff size={14} /> : <Eye size={14} />}
+            </button>
+            {showPhoto && (
+              <img
+                src={menu.image}
+                alt={`${menu.storeName} 原始菜單照片`}
+                className="w-full rounded-xl mt-2"
+                style={{ maxHeight: 420, objectFit: "contain" }}
+              />
+            )}
+          </div>
+        )}
         <div className="goa-card p-4">
           {menu.items.map((it, i) => (
             <div key={it.id} className={`flex items-center justify-between py-2.5 ${i > 0 ? "goa-divider" : ""}`}>
