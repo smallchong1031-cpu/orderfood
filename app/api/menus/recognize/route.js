@@ -63,11 +63,17 @@ export async function POST(request) {
       parsed = JSON.parse(clean);
     } catch (e) {
       console.error("AI 回傳內容無法解析為 JSON，原始內容：", textBlock.text);
-      return jsonError("AI 回傳格式不是有效的 JSON，請重新拍照再試一次，或改用手動輸入品項", 502);
+      return jsonError(
+        `AI 回傳格式不是有效的 JSON。【除錯用】AI 原始回應：${textBlock.text.slice(0, 800)}`,
+        502
+      );
     }
     if (!parsed || !Array.isArray(parsed.items)) {
       console.error("AI 回傳的 JSON 缺少 items 陣列，原始內容：", textBlock.text);
-      return jsonError("格式不符預期，請重新拍照再試一次，或改用手動輸入品項", 502);
+      return jsonError(
+        `格式不符預期。【除錯用】AI 原始回應：${textBlock.text.slice(0, 800)}`,
+        502
+      );
     }
     return NextResponse.json(parsed);
   });
