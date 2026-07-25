@@ -35,6 +35,8 @@ export const api = {
   updatePayerName: (id, data) => request(`/groups/${id}/payer`, { method: "PUT", body: JSON.stringify(data) }),
   togglePaid: (id, data) => request(`/groups/${id}/paid`, { method: "POST", body: JSON.stringify(data) }),
   markAllPaid: (id) => request(`/groups/${id}/paid-all`, { method: "POST" }),
+  updateExtraCharges: (id, extraCharges) =>
+    request(`/groups/${id}/extra-charges`, { method: "PUT", body: JSON.stringify({ extraCharges }) }),
 
   getPaymentProfile: (name) => request(`/payment-profile/${encodeURIComponent(name)}`),
   savePaymentProfile: (name, data) =>

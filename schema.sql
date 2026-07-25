@@ -26,6 +26,7 @@ create table if not exists groups (
   status text not null default 'open' check (status in ('open', 'closed')),
   member_orders jsonb not null default '{}'::jsonb,
   paid_status jsonb not null default '{}'::jsonb,
+  extra_charges jsonb not null default '[]'::jsonb,
   created_at timestamptz not null default now(),
   closed_at timestamptz
 );

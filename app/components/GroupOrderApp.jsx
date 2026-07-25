@@ -66,6 +66,19 @@ function formatOrderItemDetails(orderItem) {
   return parts.length ? `（${parts.join("、")}）` : "";
 }
 
+// 計算某人要多分攤多少額外費用（例如外送費平分，或某人品項單獨漲價）。
+function computePersonExtra(person, extraCharges, peopleCount) {
+  let extra = 0;
+  (extraCharges || []).forEach((c) => {
+    if (c.appliesTo === "all") {
+      extra += (Number(c.amount) || 0) / (peopleCount || 1);
+    } else if (c.appliesTo === person) {
+      extra += Number(c.amount) || 0;
+    }
+  });
+  return extra;
+}
+
 function resizeImageToBase64(file, maxDim = 1100) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1088,8 +1101,8 @@ function GroupList({ onOpenGroup, refreshKey }) {
 
 /* ============================== Chip Picker (reusable) ============================== */
 
-function ChipPicker({ options, value, onChange, customPlaceholder = "輸入名字" }) {
-  const [customMode, setCustomMode] = useState(!!value && !options.includes(value));
+function ChipPicker({ options, value, onChange, customPlaceholder = "輸入名字", allowCustom = true }) {
+  const [customMode, setCustomMode] = useState(allowCustom && !!value && !options.includes(value));
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap gap-1.5">
@@ -1107,19 +1120,21 @@ function ChipPicker({ options, value, onChange, customPlaceholder = "輸入名�
             {name}
           </button>
         ))}
-        <button
-          onClick={() => setCustomMode(true)}
-          className="text-xs font-bold px-2.5 py-1.5 rounded-full"
-          style={
-            customMode
-              ? { background: "var(--till)", color: "#fff" }
-              : { background: "transparent", border: "1.5px dashed var(--line)", color: "var(--ink-soft)" }
-          }
-        >
-          其他
-        </button>
+        {allowCustom && (
+          <button
+            onClick={() => setCustomMode(true)}
+            className="text-xs font-bold px-2.5 py-1.5 rounded-full"
+            style={
+              customMode
+                ? { background: "var(--till)", color: "#fff" }
+                : { background: "transparent", border: "1.5px dashed var(--line)", color: "var(--ink-soft)" }
+            }
+          >
+            其他
+          </button>
+        )}
       </div>
-      {customMode && (
+      {allowCustom && customMode && (
         <input
           value={value}
           onChange={(e) => onChange(e.target.value)}
@@ -1127,6 +1142,128 @@ function ChipPicker({ options, value, onChange, customPlaceholder = "輸入名�
           className="goa-input rounded-lg px-3 py-2 text-sm"
           autoFocus
         />
+      )}
+    </div>
+  );
+}
+
+/* ============================== Extra Charges Editor (delivery fee / price adjustments) ============================== */
+
+function ExtraChargesEditor({ group, canEdit, peopleNames, onUpdated }) {
+  const [adding, setAdding] = useState(false);
+  const [label, setLabel] = useState("");
+  const [amount, setAmount] = useState("");
+  const [appliesTo, setAppliesTo] = useState("平均分攤");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const extraCharges = group.extraCharges || [];
+
+  const startAdd = () => {
+    setLabel("");
+    setAmount("");
+    setAppliesTo("平均分攤");
+    setError("");
+    setAdding(true);
+  };
+
+  const saveNew = async () => {
+    const amt = Number(amount);
+    if (!label.trim() || !amt) {
+      setError("請填寫名稱與金額");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      const next = [
+        ...extraCharges,
+        { id: uid("ec"), label: label.trim(), amount: amt, appliesTo: appliesTo === "平均分攤" ? "all" : appliesTo },
+      ];
+      const updated = await api.updateExtraCharges(group.id, next);
+      onUpdated(updated);
+      setAdding(false);
+    } catch (e) {
+      setError(e.message || "新增失敗");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const removeCharge = async (chargeId) => {
+    setSaving(true);
+    setError("");
+    try {
+      const next = extraCharges.filter((c) => c.id !== chargeId);
+      const updated = await api.updateExtraCharges(group.id, next);
+      onUpdated(updated);
+    } catch (e) {
+      setError(e.message || "刪除失敗");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!canEdit && extraCharges.length === 0) return null;
+
+  return (
+    <div className="goa-card p-4 flex flex-col gap-2">
+      <div className="text-xs font-bold" style={{ color: "var(--ink-soft)" }}>額外費用（外送費、漲價調整等）</div>
+      {extraCharges.length === 0 && !adding && (
+        <div className="text-sm text-center py-2" style={{ color: "var(--ink-soft)" }}>目前沒有額外費用</div>
+      )}
+      {extraCharges.map((c) => (
+        <div key={c.id} className="flex items-center justify-between text-sm">
+          <span>
+            {c.label}
+            <span className="text-xs ml-1.5" style={{ color: "var(--ink-soft)" }}>
+              {c.appliesTo === "all" ? "（平均分攤）" : `（算在 ${c.appliesTo} 身上）`}
+            </span>
+          </span>
+          <span className="flex items-center gap-2">
+            <span className="goa-mono font-bold">{currency(c.amount)}</span>
+            {canEdit && (
+              <button onClick={() => removeCharge(c.id)} disabled={saving} style={{ color: "var(--ink-soft)" }}>
+                <Trash2 size={13} />
+              </button>
+            )}
+          </span>
+        </div>
+      ))}
+      {error && <div className="text-xs" style={{ color: "var(--stamp-dark)" }}>{error}</div>}
+      {canEdit && (
+        !adding ? (
+          <button onClick={startAdd} className="text-xs font-bold flex items-center gap-1 mt-1" style={{ color: "var(--stamp)" }}>
+            <Plus size={13} /> 新增額外費用
+          </button>
+        ) : (
+          <div className="flex flex-col gap-2 mt-1 p-2 rounded-lg" style={{ background: "var(--paper)" }}>
+            <input
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder="名稱（例如：外送費）"
+              className="goa-input rounded-lg px-2.5 py-1.5 text-sm"
+            />
+            <input
+              value={amount}
+              onChange={(e) => setAmount(e.target.value.replace(/[^0-9]/g, ""))}
+              inputMode="numeric"
+              placeholder="金額"
+              className="goa-input goa-mono rounded-lg px-2.5 py-1.5 text-sm"
+            />
+            <div>
+              <div className="text-xs font-bold mb-1" style={{ color: "var(--ink-soft)" }}>由誰分攤？</div>
+              <ChipPicker options={["平均分攤", ...peopleNames]} value={appliesTo} onChange={setAppliesTo} allowCustom={false} />
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => setAdding(false)} disabled={saving} className="goa-btn-outline rounded-lg py-1.5 text-xs font-bold flex-1">取消</button>
+              <button onClick={saveNew} disabled={saving} className="goa-btn-primary rounded-lg py-1.5 text-xs font-bold flex-1 flex items-center justify-center gap-1">
+                {saving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                新增
+              </button>
+            </div>
+          </div>
+        )
       )}
     </div>
   );
@@ -1146,7 +1283,9 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
   const [deleting, setDeleting] = useState(false);
   const [actionError, setActionError] = useState("");
   const entries = Object.entries(group.memberOrders || {});
-  const grandTotal = entries.reduce((s, [, o]) => s + (o.total || 0), 0);
+  const extraCharges = group.extraCharges || [];
+  const extraChargesTotal = extraCharges.reduce((s, c) => s + (Number(c.amount) || 0), 0);
+  const grandTotal = entries.reduce((s, [, o]) => s + (o.total || 0), 0) + extraChargesTotal;
   const payerName = group.payerName || group.creatorName;
   const isMe = me === payerName;
   const paidStatus = group.paidStatus || {};
@@ -1321,55 +1460,65 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
           {entries.length === 0 && (
             <div className="text-sm text-center py-4" style={{ color: "var(--ink-soft)" }}>這團沒有任何人點餐就結單了</div>
           )}
-          {entries.map(([person, order]) => (
-            <div key={person}>
-              <div className="flex items-center justify-between w-full gap-2">
-                {isMe ? (
+          {entries.map(([person, order]) => {
+            const personExtra = computePersonExtra(person, extraCharges, entries.length);
+            const adjustedTotal = order.total + personExtra;
+            return (
+              <div key={person}>
+                <div className="flex items-center justify-between w-full gap-2">
+                  {isMe ? (
+                    <button
+                      onClick={() => togglePaid(person)}
+                      disabled={togglingPerson === person}
+                      className="p-0.5 shrink-0"
+                      style={{ color: paidStatus[person] ? "var(--till)" : "var(--ink-soft)" }}
+                      aria-label={paidStatus[person] ? "標記為未付款" : "標記為已付款"}
+                    >
+                      {togglingPerson === person ? (
+                        <Loader2 size={16} className="animate-spin" />
+                      ) : paidStatus[person] ? (
+                        <CheckCircle2 size={16} />
+                      ) : (
+                        <Circle size={16} />
+                      )}
+                    </button>
+                  ) : paidStatus[person] ? (
+                    <CheckCircle2 size={16} style={{ color: "var(--till)" }} className="shrink-0" />
+                  ) : (
+                    <Circle size={16} style={{ color: "var(--line)" }} className="shrink-0" />
+                  )}
                   <button
-                    onClick={() => togglePaid(person)}
-                    disabled={togglingPerson === person}
-                    className="p-0.5 shrink-0"
-                    style={{ color: paidStatus[person] ? "var(--till)" : "var(--ink-soft)" }}
-                    aria-label={paidStatus[person] ? "標記為未付款" : "標記為已付款"}
+                    onClick={() => setExpanded((p) => ({ ...p, [person]: !p[person] }))}
+                    className="flex items-center justify-between flex-1 min-w-0"
                   >
-                    {togglingPerson === person ? (
-                      <Loader2 size={16} className="animate-spin" />
-                    ) : paidStatus[person] ? (
-                      <CheckCircle2 size={16} />
-                    ) : (
-                      <Circle size={16} />
-                    )}
+                    <span className="flex items-center gap-1.5 font-bold text-sm truncate">
+                      <UserRound size={14} style={{ color: "var(--stamp)" }} className="shrink-0" /> {person}
+                    </span>
+                    <span className="flex items-center gap-2 shrink-0">
+                      <span className="goa-mono font-black text-base">{currency(adjustedTotal)}</span>
+                      {expanded[person] ? <EyeOff size={14} /> : <Eye size={14} style={{ color: "var(--ink-soft)" }} />}
+                    </span>
                   </button>
-                ) : paidStatus[person] ? (
-                  <CheckCircle2 size={16} style={{ color: "var(--till)" }} className="shrink-0" />
-                ) : (
-                  <Circle size={16} style={{ color: "var(--line)" }} className="shrink-0" />
-                )}
-                <button
-                  onClick={() => setExpanded((p) => ({ ...p, [person]: !p[person] }))}
-                  className="flex items-center justify-between flex-1 min-w-0"
-                >
-                  <span className="flex items-center gap-1.5 font-bold text-sm truncate">
-                    <UserRound size={14} style={{ color: "var(--stamp)" }} className="shrink-0" /> {person}
-                  </span>
-                  <span className="flex items-center gap-2 shrink-0">
-                    <span className="goa-mono font-black text-base">{currency(order.total)}</span>
-                    {expanded[person] ? <EyeOff size={14} /> : <Eye size={14} style={{ color: "var(--ink-soft)" }} />}
-                  </span>
-                </button>
-              </div>
-              {expanded[person] && (
-                <div className="mt-1.5 pl-7 flex flex-col gap-1">
-                  {(order.items || []).map((it) => (
-                    <div key={it.itemId} className="flex items-center justify-between text-xs" style={{ color: "var(--ink-soft)" }}>
-                      <span>{it.name} × {it.qty}{formatOrderItemDetails(it)}</span>
-                      <span className="goa-mono">{currency(it.price * it.qty)}</span>
-                    </div>
-                  ))}
                 </div>
-              )}
-            </div>
-          ))}
+                {expanded[person] && (
+                  <div className="mt-1.5 pl-7 flex flex-col gap-1">
+                    {(order.items || []).map((it) => (
+                      <div key={it.itemId} className="flex items-center justify-between text-xs" style={{ color: "var(--ink-soft)" }}>
+                        <span>{it.name} × {it.qty}{formatOrderItemDetails(it)}</span>
+                        <span className="goa-mono">{currency(it.price * it.qty)}</span>
+                      </div>
+                    ))}
+                    {personExtra !== 0 && (
+                      <div className="flex items-center justify-between text-xs" style={{ color: "var(--stamp)" }}>
+                        <span>額外費用分攤</span>
+                        <span className="goa-mono">{currency(personExtra)}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
           {entries.length > 0 && (
             <div className="text-xs text-center" style={{ color: "var(--ink-soft)" }}>
               {isMe ? "點左邊的圈圈標記誰已經付款給你" : "圈圈是付款人幫大家標記的付款狀態"}
@@ -1382,6 +1531,16 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
           <span className="goa-mono font-black text-xl" style={{ color: "var(--stamp)" }}>{currency(grandTotal)}</span>
         </div>
       </div>
+
+      <div className="pt-3">
+        <ExtraChargesEditor
+          group={group}
+          canEdit={canEdit}
+          peopleNames={entries.map(([p]) => p)}
+          onUpdated={onGroupUpdated}
+        />
+      </div>
+
       <div className="flex items-center justify-center gap-1.5 text-xs pt-1" style={{ color: "var(--ink-soft)" }}>
         <Lock size={12} /> 這團已結單，僅供對帳查看
       </div>
@@ -1815,26 +1974,32 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile }) {
           {members.length === 0 ? (
             <div className="text-sm text-center py-4" style={{ color: "var(--ink-soft)" }}>目前還沒有人點餐</div>
           ) : (
-            members.map(([person, order], i) => (
-              <div key={person} className={`py-2.5 ${i > 0 ? "goa-divider" : ""}`}>
-                <div className="flex items-center justify-between">
-                  <span className="flex items-center gap-1.5 font-bold text-sm">
-                    <UserRound size={13} style={{ color: person === me ? "var(--stamp)" : "var(--ink-soft)" }} />
-                    {person}{person === me ? "（我）" : ""}
-                  </span>
-                  <span className="goa-mono font-bold text-sm">{currency(order.total)}</span>
+            members.map(([person, order], i) => {
+              const personExtra = computePersonExtra(person, group.extraCharges, members.length);
+              return (
+                <div key={person} className={`py-2.5 ${i > 0 ? "goa-divider" : ""}`}>
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-1.5 font-bold text-sm">
+                      <UserRound size={13} style={{ color: person === me ? "var(--stamp)" : "var(--ink-soft)" }} />
+                      {person}{person === me ? "（我）" : ""}
+                    </span>
+                    <span className="goa-mono font-bold text-sm">{currency(order.total + personExtra)}</span>
+                  </div>
+                  <div className="text-xs mt-0.5" style={{ color: "var(--ink-soft)" }}>
+                    {(order.items || []).map((it) => `${it.name}×${it.qty}${formatOrderItemDetails(it)}`).join("、")}
+                    {personExtra !== 0 && `${(order.items || []).length ? "、" : ""}額外費用分攤 ${currency(personExtra)}`}
+                  </div>
                 </div>
-                <div className="text-xs mt-0.5" style={{ color: "var(--ink-soft)" }}>
-                  {(order.items || []).map((it) => `${it.name}×${it.qty}${formatOrderItemDetails(it)}`).join("、")}
-                </div>
-              </div>
-            ))
+              );
+            })
           )}
           {members.length > 0 && (
             <>
               <div className="goa-divider pt-3 flex items-center justify-between">
                 <span className="text-sm font-bold">目前總計</span>
-                <span className="goa-mono font-black text-lg">{currency(members.reduce((s, [, o]) => s + o.total, 0))}</span>
+                <span className="goa-mono font-black text-lg">
+                  {currency(members.reduce((s, [, o]) => s + o.total, 0) + (group.extraCharges || []).reduce((s, c) => s + (Number(c.amount) || 0), 0))}
+                </span>
               </div>
               <div className="text-xs text-right mt-1" style={{ color: "var(--ink-soft)" }}>
                 付款人會在結單時標註
@@ -1842,6 +2007,13 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile }) {
             </>
           )}
         </div>
+
+        <ExtraChargesEditor
+          group={group}
+          canEdit={isCreator}
+          peopleNames={members.map(([p]) => p)}
+          onUpdated={setGroup}
+        />
       </div>
 
       {isCreator && (
