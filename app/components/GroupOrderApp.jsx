@@ -39,6 +39,23 @@ function groupItemsByCategory(items) {
   return order.map((category) => ({ category, items: map.get(category) }));
 }
 
+// 依店家分類（飲料店/早餐店...）把菜單庫的店家分組，保留第一次出現的順序。
+function groupMenusByType(menus) {
+  const order = [];
+  const map = new Map();
+  for (const m of menus) {
+    const type = (m.storeType || "").trim() || "其他";
+    if (!map.has(type)) {
+      map.set(type, []);
+      order.push(type);
+    }
+    map.get(type).push(m);
+  }
+  return order.map((type) => ({ type, menus: map.get(type) }));
+}
+
+const STORE_TYPE_PRESETS = ["飲料店", "早餐店", "便當店", "小吃店", "餐廳", "甜點"];
+
 // 把訂購紀錄裡的必選項目（例如肉類：牛肉）跟備註組成一段括號文字，供列表/收據顯示。
 function formatOrderItemDetails(orderItem) {
   const parts = [];
@@ -350,6 +367,7 @@ function MenuLibrary({ onOpenMenu, onUpload, refreshKey }) {
   const [error, setError] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
+  const [expandedTypes, setExpandedTypes] = useState(() => new Set());
 
   useEffect(() => {
     let alive = true;
@@ -363,6 +381,15 @@ function MenuLibrary({ onOpenMenu, onUpload, refreshKey }) {
     })();
     return () => { alive = false; };
   }, [refreshKey]);
+
+  const toggleType = (type) => {
+    setExpandedTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(type)) next.delete(type);
+      else next.add(type);
+      return next;
+    });
+  };
 
   const deleteMenu = async (menuId) => {
     setDeletingId(menuId);
@@ -399,20 +426,48 @@ function MenuLibrary({ onOpenMenu, onUpload, refreshKey }) {
           hint={"點右上角「新增菜單」，拍照上傳第一家店吧"}
         />
       ) : (
-        <div className="grid grid-cols-2 gap-3">
-          {menus.map((m) => (
-            <MenuCard
-              key={m.id}
-              menu={m}
-              onClick={() => onOpenMenu(m.id)}
-              isConfirming={confirmDeleteId === m.id}
-              deleting={deletingId === m.id}
-              onDeleteRequest={() => setConfirmDeleteId(m.id)}
-              onCancelDelete={() => setConfirmDeleteId(null)}
-              onConfirmDelete={() => deleteMenu(m.id)}
-            />
-          ))}
-        </div>
+        (() => {
+          const groups = groupMenusByType(menus);
+          const showHeaders = groups.length > 1;
+          return groups.map((group, gi) => {
+            const isOpen = !showHeaders || expandedTypes.has(group.type);
+            return (
+              <div key={group.type} className={gi > 0 ? "mt-4" : ""}>
+                {showHeaders && (
+                  <button
+                    onClick={() => toggleType(group.type)}
+                    className="flex items-center justify-between w-full py-1.5 mb-2"
+                  >
+                    <span className="text-sm font-black flex items-center gap-1.5" style={{ color: "var(--stamp)" }}>
+                      {group.type}
+                      <span className="font-normal" style={{ color: "var(--ink-soft)" }}>（{group.menus.length}）</span>
+                    </span>
+                    <ChevronDown
+                      size={16}
+                      style={{ color: "var(--ink-soft)", transform: isOpen ? "rotate(180deg)" : "none", transition: "transform .15s ease" }}
+                    />
+                  </button>
+                )}
+                {isOpen && (
+                  <div className="grid grid-cols-2 gap-3">
+                    {group.menus.map((m) => (
+                      <MenuCard
+                        key={m.id}
+                        menu={m}
+                        onClick={() => onOpenMenu(m.id)}
+                        isConfirming={confirmDeleteId === m.id}
+                        deleting={deletingId === m.id}
+                        onDeleteRequest={() => setConfirmDeleteId(m.id)}
+                        onCancelDelete={() => setConfirmDeleteId(null)}
+                        onConfirmDelete={() => deleteMenu(m.id)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          });
+        })()
       )}
     </div>
   );
@@ -534,6 +589,7 @@ function UploadMenuFlow({ onBack, onSaved, existingMenu }) {
   const [warning, setWarning] = useState("");
   const [storeName, setStoreName] = useState(existingMenu?.storeName || "");
   const [storePhone, setStorePhone] = useState(existingMenu?.storePhone || "");
+  const [storeType, setStoreType] = useState(existingMenu?.storeType || "");
   const [items, setItems] = useState(existingMenu ? existingMenu.items.map((it) => ({ ...it })) : []);
   const [saving, setSaving] = useState(false);
   const fileInputRef = useRef(null);
@@ -604,6 +660,7 @@ function UploadMenuFlow({ onBack, onSaved, existingMenu }) {
     const payload = {
       storeName: storeName.trim(),
       storePhone: storePhone.trim(),
+      storeType: storeType.trim(),
       items: items.map((it) => ({
         id: it.id,
         name: it.name.trim(),
@@ -713,6 +770,12 @@ function UploadMenuFlow({ onBack, onSaved, existingMenu }) {
                 className="goa-input w-full rounded-xl px-3 py-2 mt-1"
                 inputMode="tel"
               />
+            </div>
+            <div>
+              <label className="text-xs font-bold" style={{ color: "var(--ink-soft)" }}>店家分類（選填，方便菜單庫分類瀏覽）</label>
+              <div className="mt-1">
+                <ChipPicker options={STORE_TYPE_PRESETS} value={storeType} onChange={setStoreType} customPlaceholder="輸入分類名稱" />
+              </div>
             </div>
             <div className="goa-divider pt-3">
               <div className="flex items-center justify-between mb-2">
@@ -1023,14 +1086,14 @@ function GroupList({ onOpenGroup, refreshKey }) {
   );
 }
 
-/* ============================== Payer Picker ============================== */
+/* ============================== Chip Picker (reusable) ============================== */
 
-function PayerPicker({ candidates, value, onChange }) {
-  const [customMode, setCustomMode] = useState(!!value && !candidates.includes(value));
+function ChipPicker({ options, value, onChange, customPlaceholder = "輸入名字" }) {
+  const [customMode, setCustomMode] = useState(!!value && !options.includes(value));
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap gap-1.5">
-        {candidates.map((name) => (
+        {options.map((name) => (
           <button
             key={name}
             onClick={() => { onChange(name); setCustomMode(false); }}
@@ -1060,7 +1123,7 @@ function PayerPicker({ candidates, value, onChange }) {
         <input
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          placeholder="輸入名字"
+          placeholder={customPlaceholder}
           className="goa-input rounded-lg px-3 py-2 text-sm"
           autoFocus
         />
@@ -1200,8 +1263,8 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
           ) : (
             <div className="flex flex-col gap-2">
               <label className="text-xs font-bold" style={{ color: "var(--till)" }}>這攤實際上是誰付的錢？</label>
-              <PayerPicker
-                candidates={Array.from(new Set([group.creatorName, ...entries.map(([p]) => p)].filter(Boolean)))}
+              <ChipPicker
+                options={Array.from(new Set([group.creatorName, ...entries.map(([p]) => p)].filter(Boolean)))}
                 value={payerDraft}
                 onChange={setPayerDraft}
               />
@@ -1799,8 +1862,8 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile }) {
                 <label className="text-xs font-bold flex items-center gap-1 mb-1.5" style={{ color: "var(--ink-soft)" }}>
                   <Wallet size={12} /> 這攤是誰付的錢？
                 </label>
-                <PayerPicker
-                  candidates={Array.from(new Set([group.creatorName, ...members.map(([p]) => p)].filter(Boolean)))}
+                <ChipPicker
+                  options={Array.from(new Set([group.creatorName, ...members.map(([p]) => p)].filter(Boolean)))}
                   value={payerDraft}
                   onChange={setPayerDraft}
                 />

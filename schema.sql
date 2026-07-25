@@ -9,6 +9,7 @@ create table if not exists menus (
   items jsonb not null default '[]'::jsonb,
   image text,
   store_phone text,
+  store_type text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );

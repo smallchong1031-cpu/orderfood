@@ -20,12 +20,13 @@ export async function PUT(request, { params }) {
     const items = Array.isArray(body.items) ? body.items : [];
     const image = body.image || null;
     const storePhone = (body.storePhone || "").trim() || null;
+    const storeType = (body.storeType || "").trim() || null;
     if (!storeName || items.length === 0) {
       return jsonError("店名與品項不可為空", 400);
     }
     const rows = await sql`
       update menus
-      set store_name = ${storeName}, items = ${JSON.stringify(items)}::jsonb, image = ${image}, store_phone = ${storePhone}, updated_at = now()
+      set store_name = ${storeName}, items = ${JSON.stringify(items)}::jsonb, image = ${image}, store_phone = ${storePhone}, store_type = ${storeType}, updated_at = now()
       where id = ${id}
       returning *
     `;

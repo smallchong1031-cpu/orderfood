@@ -5,7 +5,7 @@ import { withErrorHandling, jsonError } from "@/lib/apiHelpers";
 
 export async function GET() {
   return withErrorHandling(async () => {
-    const rows = await sql`select id, store_name, items, created_at from menus order by created_at desc`;
+    const rows = await sql`select id, store_name, items, store_type, created_at from menus order by created_at desc`;
     return NextResponse.json(rows.map(mapMenuSummary));
   });
 }
@@ -17,12 +17,13 @@ export async function POST(request) {
     const items = Array.isArray(body.items) ? body.items : [];
     const image = body.image || null;
     const storePhone = (body.storePhone || "").trim() || null;
+    const storeType = (body.storeType || "").trim() || null;
     if (!storeName || items.length === 0) {
       return jsonError("店名與品項不可為空", 400);
     }
     const rows = await sql`
-      insert into menus (store_name, items, image, store_phone)
-      values (${storeName}, ${JSON.stringify(items)}::jsonb, ${image}, ${storePhone})
+      insert into menus (store_name, items, image, store_phone, store_type)
+      values (${storeName}, ${JSON.stringify(items)}::jsonb, ${image}, ${storePhone}, ${storeType})
       returning *
     `;
     return NextResponse.json(mapMenu(rows[0]));
