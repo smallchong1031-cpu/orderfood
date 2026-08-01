@@ -2123,13 +2123,16 @@ export default function GroupOrderApp({ initialNav }) {
     setMe(getMyName());
   }, []);
 
-  // 把目前畫面同步到網址列：看揪團時是 /groups/{id}，看菜單時是 /menus/{id}，其他畫面回到首頁網址。
+  // 把目前畫面同步到網址列：看揪團時是 /groups/{id}，看菜單時是 /menus/{id}。
   // 這樣「分享」複製的網址，才會是真正連到那一團/那份菜單，而不是永遠都是首頁。
+  // 注意：只有這三種畫面會動網址；像「更新菜單」「收款設定」這類暫時性畫面不改網址，
+  // 否則會把使用者強制拉回首頁，畫面就跳掉了。
   useEffect(() => {
-    let path = "/";
+    let path = null;
     if (nav.screen === "group" && nav.groupId) path = `/groups/${nav.groupId}`;
     else if (nav.screen === "menuDetail" && nav.menuId) path = `/menus/${nav.menuId}`;
-    if (typeof window !== "undefined" && window.location.pathname !== path) {
+    else if (nav.screen === "home") path = "/";
+    if (path && typeof window !== "undefined" && window.location.pathname !== path) {
       router.replace(path, { scroll: false });
     }
   }, [nav.screen, nav.groupId, nav.menuId, router]);
