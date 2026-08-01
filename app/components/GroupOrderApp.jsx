@@ -79,6 +79,202 @@ function computePersonExtra(person, extraCharges, peopleCount) {
   return extra;
 }
 
+// 把結單後的帳單畫成一張圖，方便直接分享到 LINE。
+// 分兩階段：先把每一列的內容整理成 rows，算出總高度，再實際畫上去。
+function buildReceiptRows({ group, entries, extraCharges, grandTotal, payerName, payerContact }) {
+  const rows = [];
+  rows.push({ type: "title", text: group.groupName });
+  rows.push({ type: "sub", text: `${group.storeName}・共 ${entries.length} 人` });
+  rows.push({ type: "payer", text: `請把錢轉給付款人：${payerName}`, contact: payerContact });
+  rows.push({ type: "divider" });
+
+  entries.forEach(([person, order]) => {
+    const personExtra = computePersonExtra(person, extraCharges, entries.length);
+    rows.push({ type: "person", text: person, amount: order.total + personExtra });
+    (order.items || []).forEach((it) => {
+      rows.push({
+        type: "item",
+        text: `${it.name} × ${it.qty}${formatOrderItemDetails(it)}`,
+        amount: it.price * it.qty,
+      });
+    });
+    if (personExtra !== 0) {
+      rows.push({
+        type: "item",
+        text: personExtra < 0 ? "折扣分攤" : "額外費用分攤",
+        amount: personExtra,
+        accent: true,
+      });
+    }
+  });
+
+  if ((extraCharges || []).length > 0) {
+    rows.push({ type: "divider" });
+    rows.push({ type: "section", text: "額外費用與折扣" });
+    extraCharges.forEach((c) => {
+      rows.push({
+        type: "item",
+        text: `${c.label}${c.appliesTo === "all" ? "（平均分攤）" : `（${c.appliesTo}）`}`,
+        amount: c.amount,
+      });
+    });
+  }
+
+  rows.push({ type: "divider" });
+  rows.push({ type: "total", text: "總計", amount: grandTotal });
+  return rows;
+}
+
+const ROW_HEIGHTS = { title: 38, sub: 26, payer: 36, divider: 18, person: 30, item: 22, section: 26, total: 42 };
+
+function renderReceiptCanvas(rows) {
+  const W = 460;
+  const PAD = 24;
+  const SCALE = 2;
+  const FONT = '"PingFang TC", "Microsoft JhengHei", "Noto Sans TC", sans-serif';
+  const MONO = '"JetBrains Mono", "Courier New", monospace';
+
+  let height = PAD * 2;
+  rows.forEach((r) => {
+    height += ROW_HEIGHTS[r.type] || 22;
+    if (r.type === "payer" && r.contact) height += 24;
+  });
+
+  const canvas = document.createElement("canvas");
+  canvas.width = W * SCALE;
+  canvas.height = height * SCALE;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(SCALE, SCALE);
+
+  ctx.fillStyle = "#FFFDF8";
+  ctx.fillRect(0, 0, W, height);
+
+  const money = (n) => (n < 0 ? `- NT$ ${Math.round(Math.abs(n)).toLocaleString("zh-TW")}` : `NT$ ${Math.round(n).toLocaleString("zh-TW")}`);
+
+  // 太長的文字截斷，避免跟右邊金額疊在一起
+  const fit = (text, maxWidth) => {
+    if (ctx.measureText(text).width <= maxWidth) return text;
+    let t = text;
+    while (t.length > 1 && ctx.measureText(t + "…").width > maxWidth) t = t.slice(0, -1);
+    return t + "…";
+  };
+
+  let y = PAD;
+  rows.forEach((r) => {
+    const h = ROW_HEIGHTS[r.type] || 22;
+    switch (r.type) {
+      case "title":
+        ctx.fillStyle = "#2B2620";
+        ctx.font = `900 24px ${FONT}`;
+        ctx.textAlign = "left";
+        ctx.fillText(fit(r.text, W - PAD * 2 - 90), PAD, y + 24);
+        ctx.fillStyle = "#C23B2E";
+        ctx.font = `700 13px ${FONT}`;
+        ctx.textAlign = "right";
+        ctx.fillText("已結單", W - PAD, y + 22);
+        break;
+      case "sub":
+        ctx.fillStyle = "#82785F";
+        ctx.font = `400 13px ${FONT}`;
+        ctx.textAlign = "left";
+        ctx.fillText(r.text, PAD, y + 16);
+        break;
+      case "payer": {
+        const boxH = r.contact ? 54 : 32;
+        ctx.fillStyle = "#E4ECE1";
+        ctx.fillRect(PAD, y, W - PAD * 2, boxH);
+        ctx.fillStyle = "#3F6B4A";
+        ctx.font = `700 14px ${FONT}`;
+        ctx.textAlign = "left";
+        ctx.fillText(fit(r.text, W - PAD * 2 - 20), PAD + 10, y + 21);
+        if (r.contact) {
+          ctx.font = `400 12px ${MONO}`;
+          ctx.fillText(fit(r.contact, W - PAD * 2 - 20), PAD + 10, y + 43);
+        }
+        break;
+      }
+      case "divider":
+        ctx.strokeStyle = "#D5CBB4";
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(PAD, y + h / 2);
+        ctx.lineTo(W - PAD, y + h / 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        break;
+      case "section":
+        ctx.fillStyle = "#82785F";
+        ctx.font = `700 12px ${FONT}`;
+        ctx.textAlign = "left";
+        ctx.fillText(r.text, PAD, y + 17);
+        break;
+      case "person":
+        ctx.fillStyle = "#2B2620";
+        ctx.font = `700 15px ${FONT}`;
+        ctx.textAlign = "left";
+        ctx.fillText(fit(r.text, W - PAD * 2 - 110), PAD, y + 20);
+        ctx.font = `700 16px ${MONO}`;
+        ctx.textAlign = "right";
+        ctx.fillText(money(r.amount), W - PAD, y + 20);
+        break;
+      case "item":
+        ctx.fillStyle = r.accent ? (r.amount < 0 ? "#3F6B4A" : "#C23B2E") : "#82785F";
+        ctx.font = `400 12px ${FONT}`;
+        ctx.textAlign = "left";
+        ctx.fillText(fit(r.text, W - PAD * 2 - 100), PAD + 12, y + 15);
+        ctx.font = `400 12px ${MONO}`;
+        ctx.textAlign = "right";
+        ctx.fillText(money(r.amount), W - PAD, y + 15);
+        break;
+      case "total":
+        ctx.fillStyle = "#2B2620";
+        ctx.font = `900 17px ${FONT}`;
+        ctx.textAlign = "left";
+        ctx.fillText(r.text, PAD, y + 26);
+        ctx.fillStyle = "#C23B2E";
+        ctx.font = `700 21px ${MONO}`;
+        ctx.textAlign = "right";
+        ctx.fillText(money(r.amount), W - PAD, y + 26);
+        break;
+      default:
+        break;
+    }
+    y += h;
+    if (r.type === "payer" && r.contact) y += 24;
+  });
+
+  return canvas;
+}
+
+async function shareReceiptImage(params) {
+  const rows = buildReceiptRows(params);
+  const canvas = renderReceiptCanvas(rows);
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+  if (!blob) throw new Error("產生圖片失敗");
+
+  const fileName = `${params.group.storeName || "揪呷團"}-帳單.png`;
+  const file = new File([blob], fileName, { type: "image/png" });
+
+  // 手機支援的話直接叫出系統分享（可以選 LINE）；不支援就退回下載圖片
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: params.group.groupName });
+      return "shared";
+    } catch (e) {
+      if (e.name === "AbortError") return "cancelled";
+    }
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return "downloaded";
+}
+
 function resizeImageToBase64(file, maxDim = 1100) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1335,6 +1531,8 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
   const [confirmAllPaid, setConfirmAllPaid] = useState(false);
   const [confirmNewGroup, setConfirmNewGroup] = useState(false);
   const [startingNew, setStartingNew] = useState(false);
+  const [sharingImage, setSharingImage] = useState(false);
+  const [shareHint, setShareHint] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [actionError, setActionError] = useState("");
   const entries = Object.entries(group.memberOrders || {});
@@ -1427,6 +1625,28 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
 
   const displayContact = profile?.contact || group.payerContact || null;
   const displayQr = profile?.qrImage || group.payerQrImage || null;
+
+  const shareImage = async () => {
+    setSharingImage(true);
+    setShareHint("");
+    setActionError("");
+    try {
+      const result = await shareReceiptImage({
+        group,
+        entries,
+        extraCharges,
+        grandTotal,
+        payerName,
+        payerContact: displayContact,
+      });
+      if (result === "downloaded") setShareHint("已下載帳單圖片，可以從相簿/下載資料夾傳到 LINE");
+      setTimeout(() => setShareHint(""), 4000);
+    } catch (e) {
+      setActionError(e.message || "產生圖片失敗");
+    } finally {
+      setSharingImage(false);
+    }
+  };
 
   return (
     <div className="px-4">
@@ -1612,6 +1832,20 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
           <span className="goa-display font-bold">總計</span>
           <span className="goa-mono font-black text-xl" style={{ color: "var(--stamp)" }}>{currency(grandTotal)}</span>
         </div>
+      </div>
+
+      <div className="pt-3">
+        <button
+          onClick={shareImage}
+          disabled={sharingImage}
+          className="goa-btn-primary w-full rounded-xl py-2.5 text-sm font-bold flex items-center justify-center gap-2"
+        >
+          {sharingImage ? <Loader2 size={15} className="animate-spin" /> : <Share2 size={15} />}
+          分享帳單圖片
+        </button>
+        {shareHint && (
+          <div className="text-xs text-center mt-1.5" style={{ color: "var(--till)" }}>{shareHint}</div>
+        )}
       </div>
 
       <div className="pt-3">
