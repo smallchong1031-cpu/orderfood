@@ -1497,33 +1497,13 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
           {entries.map(([person, order]) => {
             const personExtra = computePersonExtra(person, extraCharges, entries.length);
             const adjustedTotal = order.total + personExtra;
+            const isPaid = !!paidStatus[person];
             return (
               <div key={person}>
                 <div className="flex items-center justify-between w-full gap-2">
-                  {isMe ? (
-                    <button
-                      onClick={() => togglePaid(person)}
-                      disabled={togglingPerson === person}
-                      className="p-0.5 shrink-0"
-                      style={{ color: paidStatus[person] ? "var(--till)" : "var(--ink-soft)" }}
-                      aria-label={paidStatus[person] ? "標記為未付款" : "標記為已付款"}
-                    >
-                      {togglingPerson === person ? (
-                        <Loader2 size={16} className="animate-spin" />
-                      ) : paidStatus[person] ? (
-                        <CheckCircle2 size={16} />
-                      ) : (
-                        <Circle size={16} />
-                      )}
-                    </button>
-                  ) : paidStatus[person] ? (
-                    <CheckCircle2 size={16} style={{ color: "var(--till)" }} className="shrink-0" />
-                  ) : (
-                    <Circle size={16} style={{ color: "var(--line)" }} className="shrink-0" />
-                  )}
                   <button
                     onClick={() => setExpanded((p) => ({ ...p, [person]: !p[person] }))}
-                    className="flex items-center justify-between flex-1 min-w-0"
+                    className="flex items-center justify-between flex-1 min-w-0 gap-2"
                   >
                     <span className="flex items-center gap-1.5 font-bold text-sm truncate">
                       <UserRound size={14} style={{ color: "var(--stamp)" }} className="shrink-0" /> {person}
@@ -1534,8 +1514,43 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
                     </span>
                   </button>
                 </div>
+                <div className="mt-1 pl-5">
+                  {isMe ? (
+                    <button
+                      onClick={() => togglePaid(person)}
+                      disabled={togglingPerson === person}
+                      className="text-xs font-bold px-2.5 py-1 rounded-full inline-flex items-center gap-1"
+                      style={
+                        isPaid
+                          ? { background: "var(--till)", color: "#fff" }
+                          : { background: "transparent", border: "1.5px dashed var(--stamp)", color: "var(--stamp)" }
+                      }
+                    >
+                      {togglingPerson === person ? (
+                        <Loader2 size={11} className="animate-spin" />
+                      ) : isPaid ? (
+                        <CheckCircle2 size={11} />
+                      ) : (
+                        <Circle size={11} />
+                      )}
+                      {isPaid ? "已付款" : "尚未付款・點我標記"}
+                    </button>
+                  ) : (
+                    <span
+                      className="text-xs font-bold px-2.5 py-1 rounded-full inline-flex items-center gap-1"
+                      style={
+                        isPaid
+                          ? { background: "var(--till-bg)", color: "var(--till)" }
+                          : { background: "transparent", border: "1.5px solid var(--line)", color: "var(--ink-soft)" }
+                      }
+                    >
+                      {isPaid ? <CheckCircle2 size={11} /> : <Circle size={11} />}
+                      {isPaid ? "已付款" : "尚未付款"}
+                    </span>
+                  )}
+                </div>
                 {expanded[person] && (
-                  <div className="mt-1.5 pl-7 flex flex-col gap-1">
+                  <div className="mt-1.5 pl-5 flex flex-col gap-1">
                     {(order.items || []).map((it) => (
                       <div key={it.itemId} className="flex items-center justify-between text-xs" style={{ color: "var(--ink-soft)" }}>
                         <span>{it.name} × {it.qty}{formatOrderItemDetails(it)}</span>
@@ -1555,7 +1570,7 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
           })}
           {entries.length > 0 && (
             <div className="text-xs text-center" style={{ color: "var(--ink-soft)" }}>
-              {isMe ? "點左邊的圈圈標記誰已經付款給你" : "圈圈是付款人幫大家標記的付款狀態"}
+              {isMe ? "點每個人下面的標籤，標記他有沒有付錢給你" : `付款狀態由付款人 ${payerName} 標記`}
             </div>
           )}
         </div>
@@ -1818,13 +1833,12 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile }) {
     );
   }
 
-  const isCreator = me === group.creatorName;
 
   if (group.status === "closed") {
     return (
       <div className="pb-10">
         <TopBar title={group.groupName} subtitle={group.storeName} onBack={onBack} />
-        <ReceiptView group={group} menu={menu} me={me} canEdit={isCreator} onGroupUpdated={setGroup} onGoToProfile={onGoToProfile} onDeleteGroup={deleteGroup} />
+        <ReceiptView group={group} menu={menu} me={me} canEdit={true} onGroupUpdated={setGroup} onGoToProfile={onGoToProfile} onDeleteGroup={deleteGroup} />
       </div>
     );
   }
@@ -2044,51 +2058,53 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile }) {
 
         <ExtraChargesEditor
           group={group}
-          canEdit={isCreator}
+          canEdit={true}
           peopleNames={members.map(([p]) => p)}
           onUpdated={setGroup}
         />
       </div>
 
-      {isCreator && (
-        <div className="fixed left-0 right-0 bottom-0 p-4" style={{ maxWidth: 480, margin: "0 auto" }}>
-          {!confirmingClose ? (
-            <button
-              onClick={() => { setPayerDraft(group.creatorName || me || ""); setConfirmingClose(true); }}
-              className="w-full rounded-xl py-3 font-bold flex items-center justify-center gap-2 shadow-lg"
-              style={{ background: "var(--ink)", color: "var(--card)" }}
-            >
-              <Receipt size={16} />
-              結單
-            </button>
-          ) : (
-            <div className="goa-card p-3 flex flex-col gap-2 goa-pop shadow-lg">
-              <div className="text-sm text-center font-bold">確定要結單嗎？結單後大家就不能再修改點餐了。</div>
-              <div>
-                <label className="text-xs font-bold flex items-center gap-1 mb-1.5" style={{ color: "var(--ink-soft)" }}>
-                  <Wallet size={12} /> 這攤是誰付的錢？
-                </label>
-                <ChipPicker
-                  options={Array.from(new Set([group.creatorName, ...members.map(([p]) => p)].filter(Boolean)))}
-                  value={payerDraft}
-                  onChange={setPayerDraft}
-                />
-              </div>
-              <div className="flex gap-2">
-                <button onClick={() => setConfirmingClose(false)} disabled={closing} className="goa-btn-outline rounded-xl py-2 text-sm font-bold flex-1">取消</button>
-                <button
-                  onClick={closeGroup}
-                  disabled={closing || !payerDraft.trim()}
-                  className="goa-btn-primary rounded-xl py-2 text-sm font-bold flex-1 flex items-center justify-center gap-1.5"
-                >
-                  {closing ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
-                  確定結單
-                </button>
+      <div className="fixed left-0 right-0 bottom-0 p-4" style={{ maxWidth: 480, margin: "0 auto" }}>
+        {!confirmingClose ? (
+          <button
+            onClick={() => { setPayerDraft(group.creatorName || me || ""); setConfirmingClose(true); }}
+            className="w-full rounded-xl py-3 font-bold flex items-center justify-center gap-2 shadow-lg"
+            style={{ background: "var(--ink)", color: "var(--card)" }}
+          >
+            <Receipt size={16} />
+            結單
+          </button>
+        ) : (
+          <div className="goa-card p-3 flex flex-col gap-2 goa-pop shadow-lg">
+            <div className="text-sm text-center font-bold">確定要結單嗎？結單後大家就不能再修改點餐了。</div>
+            <div>
+              <label className="text-xs font-bold flex items-center gap-1 mb-1.5" style={{ color: "var(--ink-soft)" }}>
+                <Wallet size={12} /> 這攤是誰付的錢？
+              </label>
+              <ChipPicker
+                options={Array.from(new Set([group.creatorName, ...members.map(([p]) => p)].filter(Boolean)))}
+                value={payerDraft}
+                onChange={setPayerDraft}
+              />
+              <div className="text-xs mt-1.5 flex items-start gap-1" style={{ color: "var(--ink-soft)" }}>
+                <AlertCircle size={12} className="shrink-0 mt-0.5" />
+                <span>還不確定誰付錢也沒關係，先隨便選一個，結單後在收據上隨時可以改。</span>
               </div>
             </div>
-          )}
-        </div>
-      )}
+            <div className="flex gap-2">
+              <button onClick={() => setConfirmingClose(false)} disabled={closing} className="goa-btn-outline rounded-xl py-2 text-sm font-bold flex-1">取消</button>
+              <button
+                onClick={closeGroup}
+                disabled={closing || !payerDraft.trim()}
+                className="goa-btn-primary rounded-xl py-2 text-sm font-bold flex-1 flex items-center justify-center gap-1.5"
+              >
+                {closing ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                確定結單
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
