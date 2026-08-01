@@ -1242,9 +1242,9 @@ function ExtraChargesEditor({ group, canEdit, peopleNames, onUpdated }) {
 
   return (
     <div className="goa-card p-4 flex flex-col gap-2">
-      <div className="text-xs font-bold" style={{ color: "var(--ink-soft)" }}>額外費用（外送費、漲價調整等）</div>
+      <div className="text-xs font-bold" style={{ color: "var(--ink-soft)" }}>額外費用與折扣（外送費、漲價、折價券等）</div>
       {extraCharges.length === 0 && !adding && (
-        <div className="text-sm text-center py-2" style={{ color: "var(--ink-soft)" }}>目前沒有額外費用</div>
+        <div className="text-sm text-center py-2" style={{ color: "var(--ink-soft)" }}>目前沒有額外費用或折扣</div>
       )}
       {extraCharges.map((c) => (
         <div key={c.id} className="flex items-center justify-between text-sm">
@@ -1255,7 +1255,7 @@ function ExtraChargesEditor({ group, canEdit, peopleNames, onUpdated }) {
             </span>
           </span>
           <span className="flex items-center gap-2">
-            <span className="goa-mono font-bold">{currency(c.amount)}</span>
+            <span className="goa-mono font-bold" style={{ color: c.amount < 0 ? "var(--till)" : "var(--ink)" }}>{c.amount < 0 ? `- ${currency(Math.abs(c.amount))}` : currency(c.amount)}</span>
             {canEdit && (
               <button onClick={() => removeCharge(c.id)} disabled={saving} style={{ color: "var(--ink-soft)" }}>
                 <Trash2 size={13} />
@@ -1268,23 +1268,42 @@ function ExtraChargesEditor({ group, canEdit, peopleNames, onUpdated }) {
       {canEdit && (
         !adding ? (
           <button onClick={startAdd} className="text-xs font-bold flex items-center gap-1 mt-1" style={{ color: "var(--stamp)" }}>
-            <Plus size={13} /> 新增額外費用
+            <Plus size={13} /> 新增費用／折扣
           </button>
         ) : (
           <div className="flex flex-col gap-2 mt-1 p-2 rounded-lg" style={{ background: "var(--paper)" }}>
             <input
               value={label}
               onChange={(e) => setLabel(e.target.value)}
-              placeholder="名稱（例如：外送費）"
+              placeholder="名稱（例如：外送費、折價券）"
               className="goa-input rounded-lg px-2.5 py-1.5 text-sm"
             />
-            <input
-              value={amount}
-              onChange={(e) => setAmount(e.target.value.replace(/[^0-9]/g, ""))}
-              inputMode="numeric"
-              placeholder="金額"
-              className="goa-input goa-mono rounded-lg px-2.5 py-1.5 text-sm"
-            />
+            <div>
+              <div className="flex items-center gap-2">
+                <input
+                  value={amount}
+                  onChange={(e) => {
+                    // 允許負號，但只能放在最前面（例如 -50）
+                    const v = e.target.value.replace(/[^0-9-]/g, "");
+                    const negative = v.startsWith("-");
+                    const digits = v.replace(/-/g, "");
+                    setAmount(negative ? `-${digits}` : digits);
+                  }}
+                  inputMode="text"
+                  placeholder="金額（折扣請填負數，例如 -50）"
+                  className="goa-input goa-mono rounded-lg px-2.5 py-1.5 text-sm flex-1"
+                />
+                <button
+                  onClick={() => setAmount((prev) => (prev.startsWith("-") ? prev.slice(1) : prev ? `-${prev}` : prev))}
+                  className="goa-btn-outline rounded-lg px-2.5 py-1.5 text-xs font-bold shrink-0"
+                >
+                  ± 正負
+                </button>
+              </div>
+              {amount.startsWith("-") && (
+                <div className="text-xs mt-1" style={{ color: "var(--till)" }}>這是折扣，會從總金額扣掉</div>
+              )}
+            </div>
             <div>
               <div className="text-xs font-bold mb-1" style={{ color: "var(--ink-soft)" }}>由誰分攤？</div>
               <ChipPicker options={["平均分攤", ...peopleNames]} value={appliesTo} onChange={setAppliesTo} allowCustom={false} />
@@ -1572,9 +1591,9 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
                       </div>
                     ))}
                     {personExtra !== 0 && (
-                      <div className="flex items-center justify-between text-xs" style={{ color: "var(--stamp)" }}>
-                        <span>額外費用分攤</span>
-                        <span className="goa-mono">{currency(personExtra)}</span>
+                      <div className="flex items-center justify-between text-xs" style={{ color: personExtra < 0 ? "var(--till)" : "var(--stamp)" }}>
+                        <span>{personExtra < 0 ? "折扣分攤" : "額外費用分攤"}</span>
+                        <span className="goa-mono">{personExtra < 0 ? `- ${currency(Math.abs(personExtra))}` : currency(personExtra)}</span>
                       </div>
                     )}
                   </div>
@@ -2078,7 +2097,7 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile, onGoTo
                   </div>
                   <div className="text-xs mt-0.5" style={{ color: "var(--ink-soft)" }}>
                     {(order.items || []).map((it) => `${it.name}×${it.qty}${formatOrderItemDetails(it)}`).join("、")}
-                    {personExtra !== 0 && `${(order.items || []).length ? "、" : ""}額外費用分攤 ${currency(personExtra)}`}
+                    {personExtra !== 0 && `${(order.items || []).length ? "、" : ""}${personExtra < 0 ? `折扣分攤 -${currency(Math.abs(personExtra))}` : `額外費用分攤 ${currency(personExtra)}`}`}
                   </div>
                 </div>
               );
