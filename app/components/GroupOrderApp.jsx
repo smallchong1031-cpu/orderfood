@@ -835,7 +835,19 @@ function MenuDetail({ menuId, onBack, onGroupCreated, onUpdateMenu }) {
   const [showCreate, setShowCreate] = useState(false);
   const [showPhoto, setShowPhoto] = useState(false);
   const [expandedCats, setExpandedCats] = useState(() => new Set());
+  const [shareStatus, setShareStatus] = useState("idle");
   const me = useRef(null);
+
+  const doShare = async () => {
+    const url = window.location.href;
+    try {
+      await navigator.clipboard.writeText(url);
+      setShareStatus("copied");
+      setTimeout(() => setShareStatus("idle"), 2000);
+    } catch (e) {
+      setShareStatus("fallback");
+    }
+  };
 
   const toggleCat = (cat) => {
     setExpandedCats((prev) => {
@@ -902,15 +914,37 @@ function MenuDetail({ menuId, onBack, onGroupCreated, onUpdateMenu }) {
         subtitle={`共 ${menu.items.length} 項品項`}
         onBack={onBack}
         right={
-          <button
-            onClick={() => onUpdateMenu(menu)}
-            className="text-xs font-bold px-2 py-1 flex items-center gap-1"
-            style={{ color: "var(--ink-soft)" }}
-          >
-            <Upload size={13} /> 更新菜單
-          </button>
+          <div className="flex items-center gap-2">
+            {shareStatus === "copied" && (
+              <span className="text-xs font-bold" style={{ color: "var(--till)" }}>已複製</span>
+            )}
+            <button onClick={doShare} className="p-2" style={{ color: "var(--ink-soft)" }} aria-label="分享菜單">
+              <Share2 size={15} />
+            </button>
+            <button
+              onClick={() => onUpdateMenu(menu)}
+              className="text-xs font-bold px-2 py-1 flex items-center gap-1"
+              style={{ color: "var(--ink-soft)" }}
+            >
+              <Upload size={13} /> 更新菜單
+            </button>
+          </div>
         }
       />
+      {shareStatus === "fallback" && (
+        <div className="px-4 mb-3">
+          <div className="goa-card p-3 flex flex-col gap-2 goa-pop">
+            <div className="text-xs font-bold" style={{ color: "var(--ink-soft)" }}>自動複製失敗，點下面網址全選後手動複製</div>
+            <input
+              readOnly
+              value={typeof window !== "undefined" ? window.location.href : ""}
+              onFocus={(e) => e.target.select()}
+              className="goa-input goa-mono text-xs rounded-lg px-2.5 py-2 w-full"
+            />
+            <button onClick={() => setShareStatus("idle")} className="goa-btn-outline rounded-lg py-1.5 text-xs font-bold">關閉</button>
+          </div>
+        </div>
+      )}
       <div className="px-4 flex flex-col gap-3">
         {menu.storePhone && (
           <a
@@ -2073,14 +2107,16 @@ export default function GroupOrderApp({ initialNav }) {
     setMe(getMyName());
   }, []);
 
-  // 把目前畫面同步到網址列：看揪團時網址變成 /groups/{id}，其他畫面則回到首頁網址。
-  // 這樣「分享」複製的網址，才會是真正連到那一團、而不是永遠都是首頁。
+  // 把目前畫面同步到網址列：看揪團時是 /groups/{id}，看菜單時是 /menus/{id}，其他畫面回到首頁網址。
+  // 這樣「分享」複製的網址，才會是真正連到那一團/那份菜單，而不是永遠都是首頁。
   useEffect(() => {
-    const path = nav.screen === "group" && nav.groupId ? `/groups/${nav.groupId}` : "/";
+    let path = "/";
+    if (nav.screen === "group" && nav.groupId) path = `/groups/${nav.groupId}`;
+    else if (nav.screen === "menuDetail" && nav.menuId) path = `/menus/${nav.menuId}`;
     if (typeof window !== "undefined" && window.location.pathname !== path) {
       router.replace(path, { scroll: false });
     }
-  }, [nav.screen, nav.groupId, router]);
+  }, [nav.screen, nav.groupId, nav.menuId, router]);
 
   const openSwitchIdentity = () => {
     setNameDraft(me || "");
