@@ -25,6 +25,7 @@ export const api = {
   updateMenu: (id, data) => request(`/menus/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteMenu: (id) => request(`/menus/${id}`, { method: "DELETE" }),
   recognizeMenu: (data) => request("/menus/recognize", { method: "POST", body: JSON.stringify(data) }),
+  startGroup: (menuId, data) => request(`/menus/${menuId}/start-group`, { method: "POST", body: JSON.stringify(data) }),
 
   listGroups: () => request("/groups"),
   getGroup: (id) => request(`/groups/${id}`),
