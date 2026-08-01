@@ -2156,7 +2156,7 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile, onGoTo
 
 export default function GroupOrderApp({ initialNav }) {
   const [me, setMe] = useState(undefined);
-  const [nav, setNav] = useState(initialNav || { screen: "home", tab: "menus" });
+  const [nav, setNav] = useState(initialNav || { screen: "home", tab: "groups" });
   const [refreshKey, setRefreshKey] = useState(0);
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
@@ -2246,8 +2246,8 @@ export default function GroupOrderApp({ initialNav }) {
           )}
           <div className="px-4 flex gap-2 mb-3">
             {[
-              { key: "menus", label: "菜單庫" },
               { key: "groups", label: "揪團" },
+              { key: "menus", label: "菜單庫" },
             ].map((t) => (
               <button
                 key={t.key}
@@ -2296,7 +2296,7 @@ export default function GroupOrderApp({ initialNav }) {
       )}
 
       {nav.screen === "paymentProfile" && (
-        <PaymentProfileEditor me={me} onBack={() => setNav({ screen: "home", tab: "menus" })} />
+        <PaymentProfileEditor me={me} onBack={() => setNav({ screen: "home", tab: "groups" })} />
       )}
 
       {nav.screen === "group" && (
