@@ -1305,7 +1305,7 @@ function ExtraChargesEditor({ group, canEdit, peopleNames, onUpdated }) {
 
 /* ============================== Receipt (closed group) ============================== */
 
-function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, onDeleteGroup }) {
+function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, onDeleteGroup, onGoToGroup }) {
   const [expanded, setExpanded] = useState({});
   const [editingPayer, setEditingPayer] = useState(false);
   const [payerDraft, setPayerDraft] = useState("");
@@ -1314,6 +1314,8 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
   const [togglingPerson, setTogglingPerson] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmAllPaid, setConfirmAllPaid] = useState(false);
+  const [confirmNewGroup, setConfirmNewGroup] = useState(false);
+  const [startingNew, setStartingNew] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [actionError, setActionError] = useState("");
   const entries = Object.entries(group.memberOrders || {});
@@ -1377,6 +1379,18 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
     } catch (e) {
       setActionError(e.message || "刪除失敗");
       setDeleting(false);
+    }
+  };
+
+  const startNewGroup = async () => {
+    setStartingNew(true);
+    setActionError("");
+    try {
+      const res = await api.startGroup(group.menuId, { creatorName: me, force: true });
+      onGoToGroup?.(res.group.id);
+    } catch (e) {
+      setActionError(e.message || "開新團失敗");
+      setStartingNew(false);
     }
   };
 
@@ -1594,6 +1608,35 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
         <Lock size={12} /> 這團已結單，僅供對帳查看
       </div>
 
+      {group.menuId && (
+        <div className="pt-3">
+          {!confirmNewGroup ? (
+            <button
+              onClick={() => setConfirmNewGroup(true)}
+              className="w-full rounded-xl py-2.5 text-sm font-bold flex items-center justify-center gap-2"
+              style={{ background: "transparent", border: "1.5px solid var(--ink)", color: "var(--ink)" }}
+            >
+              <Plus size={15} /> 在這家店開新一團
+            </button>
+          ) : (
+            <div className="goa-card p-3 flex flex-col gap-2 goa-pop">
+              <div className="text-sm text-center font-bold">要在「{group.storeName}」開新的一團嗎？這張收據會保留。</div>
+              <div className="flex gap-2">
+                <button onClick={() => setConfirmNewGroup(false)} disabled={startingNew} className="goa-btn-outline rounded-xl py-2 text-sm font-bold flex-1">取消</button>
+                <button
+                  onClick={startNewGroup}
+                  disabled={startingNew}
+                  className="goa-btn-primary rounded-xl py-2 text-sm font-bold flex-1 flex items-center justify-center gap-1.5"
+                >
+                  {startingNew ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                  開新一團
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {actionError && (
         <div className="flex items-start gap-2 text-sm p-3 rounded-xl mt-3" style={{ background: "#F5E3DE", color: "var(--stamp-dark)" }}>
           <AlertCircle size={16} className="shrink-0 mt-0.5" /><span>{actionError}</span>
@@ -1665,7 +1708,7 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
 
 /* ============================== Group View (open) ============================== */
 
-function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile }) {
+function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile, onGoToGroup }) {
   const [group, setGroup] = useState(null);
   const [menu, setMenu] = useState(null);
   const [myQty, setMyQty] = useState({});
@@ -1838,7 +1881,7 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile }) {
     return (
       <div className="pb-10">
         <TopBar title={group.groupName} subtitle={group.storeName} onBack={onBack} />
-        <ReceiptView group={group} menu={menu} me={me} canEdit={true} onGroupUpdated={setGroup} onGoToProfile={onGoToProfile} onDeleteGroup={deleteGroup} />
+        <ReceiptView group={group} menu={menu} me={me} canEdit={true} onGroupUpdated={setGroup} onGoToProfile={onGoToProfile} onDeleteGroup={deleteGroup} onGoToGroup={onGoToGroup} />
       </div>
     );
   }
@@ -2263,6 +2306,7 @@ export default function GroupOrderApp({ initialNav }) {
           onBack={() => setNav({ screen: "home", tab: "groups" })}
           onChangedStatus={() => setRefreshKey((k) => k + 1)}
           onGoToProfile={() => setNav({ screen: "paymentProfile" })}
+          onGoToGroup={(gid) => { setRefreshKey((k) => k + 1); setNav({ screen: "group", groupId: gid }); }}
         />
       )}
     </div>
