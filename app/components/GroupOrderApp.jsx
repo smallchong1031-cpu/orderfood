@@ -275,6 +275,14 @@ async function shareReceiptImage(params) {
   return "downloaded";
 }
 
+// 使用者可能填完整網址，也可能只填 LINE ID，這裡統一轉成可以點的連結
+function toLineLink(raw) {
+  const v = (raw || "").trim();
+  if (!v) return null;
+  if (/^https?:\/\//i.test(v)) return v;
+  return `https://line.me/ti/p/~${v.replace(/^~/, "")}`;
+}
+
 function resizeImageToBase64(file, maxDim = 1100) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -404,6 +412,7 @@ function PaymentProfileEditor({ me, onBack }) {
   const [loading, setLoading] = useState(true);
   const [contact, setContact] = useState("");
   const [qrImage, setQrImage] = useState(null);
+  const [lineUrl, setLineUrl] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [savedAt, setSavedAt] = useState(null);
@@ -417,6 +426,7 @@ function PaymentProfileEditor({ me, onBack }) {
         if (!alive) return;
         setContact(p?.contact || "");
         setQrImage(p?.qrImage || null);
+        setLineUrl(p?.lineUrl || "");
         setSavedAt(p?.updatedAt || null);
       } catch (e) {
         if (alive) setError(e.message || "讀取失敗");
@@ -442,7 +452,7 @@ function PaymentProfileEditor({ me, onBack }) {
     setSaving(true);
     setError("");
     try {
-      const updated = await api.savePaymentProfile(me, { contact: contact.trim() || null, qrImage: qrImage || null });
+      const updated = await api.savePaymentProfile(me, { contact: contact.trim() || null, qrImage: qrImage || null, lineUrl: lineUrl.trim() || null });
       setSavedAt(updated.updatedAt);
     } catch (e) {
       setError(e.message || "儲存失敗");
@@ -458,6 +468,7 @@ function PaymentProfileEditor({ me, onBack }) {
       await api.deletePaymentProfile(me);
       setContact("");
       setQrImage(null);
+      setLineUrl("");
       setSavedAt(null);
     } catch (e) {
       setError(e.message || "清除失敗");
@@ -512,6 +523,18 @@ function PaymentProfileEditor({ me, onBack }) {
               </div>
             )}
             <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => pickQrFile(e.target.files?.[0])} />
+          </div>
+          <div>
+            <label className="text-xs font-bold" style={{ color: "var(--ink-soft)" }}>我的 LINE 連結或 LINE ID（選填）</label>
+            <input
+              value={lineUrl}
+              onChange={(e) => setLineUrl(e.target.value)}
+              className="goa-input w-full rounded-xl px-3 py-2 text-sm mt-1"
+              placeholder="貼上 LINE 邀請連結，或直接填 LINE ID"
+            />
+            <div className="text-xs mt-1" style={{ color: "var(--ink-soft)" }}>
+              填了之後，你當付款人時大家點你的名字就能直接開你的 LINE 對話。取得方式：LINE →「加入好友」→「邀請」→ 分享網址。
+            </div>
           </div>
           {error && <div className="text-xs" style={{ color: "var(--stamp-dark)" }}>{error}</div>}
           <button
@@ -1032,6 +1055,7 @@ function MenuDetail({ menuId, onBack, onGroupCreated, onUpdateMenu }) {
   const [showPhoto, setShowPhoto] = useState(false);
   const [expandedCats, setExpandedCats] = useState(() => new Set());
   const [shareStatus, setShareStatus] = useState("idle");
+  const [justClosed, setJustClosed] = useState(false);
   const me = useRef(null);
 
   const doShare = async () => {
@@ -1520,7 +1544,7 @@ function ExtraChargesEditor({ group, canEdit, peopleNames, onUpdated }) {
 
 /* ============================== Receipt (closed group) ============================== */
 
-function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, onDeleteGroup, onGoToGroup }) {
+function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, onDeleteGroup, onGoToGroup, justClosed, onReopened }) {
   const [expanded, setExpanded] = useState({});
   const [editingPayer, setEditingPayer] = useState(false);
   const [payerDraft, setPayerDraft] = useState("");
@@ -1533,6 +1557,9 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
   const [startingNew, setStartingNew] = useState(false);
   const [sharingImage, setSharingImage] = useState(false);
   const [shareHint, setShareHint] = useState("");
+  const [confirmReopen, setConfirmReopen] = useState(false);
+  const [reopening, setReopening] = useState(false);
+  const autoSharedRef = useRef(false);
   const [deleting, setDeleting] = useState(false);
   const [actionError, setActionError] = useState("");
   const entries = Object.entries(group.memberOrders || {});
@@ -1599,6 +1626,19 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
     }
   };
 
+  const reopenGroup = async () => {
+    setReopening(true);
+    setActionError("");
+    try {
+      const updated = await api.reopenGroup(group.id);
+      onGroupUpdated?.(updated);
+      onReopened?.();
+    } catch (e) {
+      setActionError(e.message || "取消結單失敗");
+      setReopening(false);
+    }
+  };
+
   const startNewGroup = async () => {
     setStartingNew(true);
     setActionError("");
@@ -1625,6 +1665,7 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
 
   const displayContact = profile?.contact || group.payerContact || null;
   const displayQr = profile?.qrImage || group.payerQrImage || null;
+  const payerLineLink = toLineLink(profile?.lineUrl);
 
   const shareImage = async () => {
     setSharingImage(true);
@@ -1647,6 +1688,14 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
       setSharingImage(false);
     }
   };
+
+  // 剛按下結單時自動叫出分享帳單圖片（等付款資料載入完才做，且整個頁面只做一次）
+  useEffect(() => {
+    if (!justClosed || autoSharedRef.current || profile === undefined) return;
+    autoSharedRef.current = true;
+    shareImage();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [justClosed, profile]);
 
   return (
     <div className="px-4">
@@ -1673,7 +1722,22 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
           {!editingPayer ? (
             <div className="flex items-center justify-between">
               <span className="flex items-center gap-2 text-sm font-bold" style={{ color: "var(--till)" }}>
-                <Wallet size={15} /> 請把錢轉給付款人：{payerName}
+                <Wallet size={15} />
+                <span>
+                  請把錢轉給付款人：
+                  {payerLineLink ? (
+                    <a
+                      href={payerLineLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline decoration-dotted underline-offset-2"
+                    >
+                      {payerName} 💬
+                    </a>
+                  ) : (
+                    payerName
+                  )}
+                </span>
               </span>
               {canEdit && (
                 <button
@@ -1859,6 +1923,34 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
 
       <div className="flex items-center justify-center gap-1.5 text-xs pt-1" style={{ color: "var(--ink-soft)" }}>
         <Lock size={12} /> 這團已結單，僅供對帳查看
+      </div>
+
+      <div className="pt-3">
+        {!confirmReopen ? (
+          <button
+            onClick={() => setConfirmReopen(true)}
+            className="w-full rounded-xl py-2.5 text-sm font-bold flex items-center justify-center gap-2"
+            style={{ background: "transparent", border: "1.5px solid var(--till)", color: "var(--till)" }}
+          >
+            <RefreshCw size={15} /> 取消結單，讓大家繼續點餐
+          </button>
+        ) : (
+          <div className="goa-card p-3 flex flex-col gap-2 goa-pop">
+            <div className="text-sm text-center font-bold">要取消結單嗎？大家就可以繼續點餐或修改，付款人與付款紀錄會保留。</div>
+            <div className="flex gap-2">
+              <button onClick={() => setConfirmReopen(false)} disabled={reopening} className="goa-btn-outline rounded-xl py-2 text-sm font-bold flex-1">取消</button>
+              <button
+                onClick={reopenGroup}
+                disabled={reopening}
+                className="rounded-xl py-2 text-sm font-bold flex-1 flex items-center justify-center gap-1.5"
+                style={{ background: "var(--till)", color: "#fff" }}
+              >
+                {reopening ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                確定取消結單
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {group.menuId && (
@@ -2091,6 +2183,7 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile, onGoTo
     try {
       const updated = await api.closeGroup(groupId, { payerName: payerDraft.trim() || group.creatorName });
       setGroup(updated);
+      setJustClosed(true);
       onChangedStatus?.();
     } catch (e) {
       setError(e.message || "結單失敗");
@@ -2134,7 +2227,18 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile, onGoTo
     return (
       <div className="pb-10">
         <TopBar title={group.groupName} subtitle={group.storeName} onBack={onBack} />
-        <ReceiptView group={group} menu={menu} me={me} canEdit={true} onGroupUpdated={setGroup} onGoToProfile={onGoToProfile} onDeleteGroup={deleteGroup} onGoToGroup={onGoToGroup} />
+        <ReceiptView
+          group={group}
+          menu={menu}
+          me={me}
+          canEdit={true}
+          onGroupUpdated={setGroup}
+          onGoToProfile={onGoToProfile}
+          onDeleteGroup={deleteGroup}
+          onGoToGroup={onGoToGroup}
+          justClosed={justClosed}
+          onReopened={() => { setJustClosed(false); setConfirmingClose(false); onChangedStatus?.(); }}
+        />
       </div>
     );
   }
@@ -2144,7 +2248,7 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile, onGoTo
   const showMenuCategoryHeaders = groupedMenuItems.length > 1;
 
   return (
-    <div className="pb-28">
+    <div className="pb-10">
       <TopBar
         title={group.groupName}
         subtitle={`${group.storeName} ・ 發起人 ${group.creatorName}`}
@@ -2360,18 +2464,18 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile, onGoTo
         />
       </div>
 
-      <div className="fixed left-0 right-0 bottom-0 p-4" style={{ maxWidth: 480, margin: "0 auto" }}>
+      <div className="px-4 pt-4">
         {!confirmingClose ? (
           <button
             onClick={() => { setPayerDraft(group.creatorName || me || ""); setConfirmingClose(true); }}
-            className="w-full rounded-xl py-3 font-bold flex items-center justify-center gap-2 shadow-lg"
-            style={{ background: "var(--ink)", color: "var(--card)" }}
+            className="w-full rounded-xl py-2.5 text-sm font-bold flex items-center justify-center gap-2"
+            style={{ background: "transparent", border: "1.5px solid var(--ink)", color: "var(--ink)" }}
           >
-            <Receipt size={16} />
+            <Receipt size={15} />
             結單
           </button>
         ) : (
-          <div className="goa-card p-3 flex flex-col gap-2 goa-pop shadow-lg">
+          <div className="goa-card p-3 flex flex-col gap-2 goa-pop">
             <div className="text-sm text-center font-bold">確定要結單嗎？結單後大家就不能再修改點餐了。</div>
             <div>
               <label className="text-xs font-bold flex items-center gap-1 mb-1.5" style={{ color: "var(--ink-soft)" }}>

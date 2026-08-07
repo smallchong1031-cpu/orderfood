@@ -35,6 +35,7 @@ create table if not exists payment_profiles (
   name text primary key,
   contact text,
   qr_image text,
+  line_url text,
   updated_at timestamptz not null default now()
 );
 

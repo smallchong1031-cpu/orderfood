@@ -19,12 +19,13 @@ export async function PUT(request, { params }) {
     const body = await request.json();
     const contact = body.contact ? String(body.contact).trim() || null : null;
     const qrImage = body.qrImage || null;
+    const lineUrl = body.lineUrl ? String(body.lineUrl).trim() || null : null;
 
     const rows = await sql`
-      insert into payment_profiles (name, contact, qr_image, updated_at)
-      values (${decodedName}, ${contact}, ${qrImage}, now())
+      insert into payment_profiles (name, contact, qr_image, line_url, updated_at)
+      values (${decodedName}, ${contact}, ${qrImage}, ${lineUrl}, now())
       on conflict (name) do update
-        set contact = excluded.contact, qr_image = excluded.qr_image, updated_at = now()
+        set contact = excluded.contact, qr_image = excluded.qr_image, line_url = excluded.line_url, updated_at = now()
       returning *
     `;
     return NextResponse.json(mapPaymentProfile(rows[0]));

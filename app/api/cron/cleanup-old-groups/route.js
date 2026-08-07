@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { sql } from "@/lib/db";
 
-// 由 Vercel Cron 每天觸發一次：把「已結單超過 5 天」的揪團自動刪除。
+// 由 Vercel Cron 每天觸發一次：把「已結單超過 2 天」的揪團自動刪除。
 // Vercel 會在請求上帶 Authorization: Bearer <CRON_SECRET>，用來確認這是 Vercel 自己觸發的、
 // 不是別人隨便打這個網址就能清資料庫。
 export async function GET(request) {
@@ -13,7 +13,7 @@ export async function GET(request) {
   try {
     const deleted = await sql`
       delete from groups
-      where status = 'closed' and closed_at < now() - interval '5 days'
+      where status = 'closed' and closed_at < now() - interval '2 days'
       returning id
     `;
     return NextResponse.json({ deletedCount: deleted.length });
