@@ -1543,10 +1543,10 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
   const autoSharedRef = useRef(false);
   const [deleting, setDeleting] = useState(false);
   const [actionError, setActionError] = useState("");
-  const entries = Object.entries(group.memberOrders || {});
-  const extraCharges = group.extraCharges || [];
+  const entries = Object.entries(group.memberOrders || {}).filter(([, o]) => o && typeof o === "object");
+  const extraCharges = Array.isArray(group.extraCharges) ? group.extraCharges : [];
   const extraChargesTotal = extraCharges.reduce((s, c) => s + (Number(c.amount) || 0), 0);
-  const grandTotal = entries.reduce((s, [, o]) => s + (o.total || 0), 0) + extraChargesTotal;
+  const grandTotal = entries.reduce((s, [, o]) => s + (Number(o.total) || 0), 0) + extraChargesTotal;
   const payerName = group.payerName || group.creatorName;
   const isMe = me === payerName;
   const paidStatus = group.paidStatus || {};
@@ -1783,7 +1783,7 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
           )}
           {entries.map(([person, order]) => {
             const personExtra = computePersonExtra(person, extraCharges, entries.length);
-            const adjustedTotal = order.total + personExtra;
+            const adjustedTotal = (Number(order.total) || 0) + personExtra;
             const isPaid = !!paidStatus[person];
             return (
               <div key={person}>
