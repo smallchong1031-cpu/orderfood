@@ -12,7 +12,7 @@ import { CSS } from "@dnd-kit/utilities";
 import {
   Plus, Minus, ChevronLeft, ChevronDown, Loader2, Users, Receipt,
   Check, Store, RefreshCw, Eye, EyeOff, AlertCircle, Sparkles,
-  UserRound, Lock, ImagePlus, Trash2, PencilLine, Wallet, QrCode,
+  UserRound, Lock, ImagePlus, Trash2, PencilLine, Wallet,
   Circle, CheckCircle2, Share2, Upload, Phone, GripVertical, ListChecks,
 } from "lucide-react";
 import { api } from "./api";
@@ -246,33 +246,53 @@ function renderReceiptCanvas(rows) {
   return canvas;
 }
 
-async function shareReceiptImage(params) {
-  const rows = buildReceiptRows(params);
-  const canvas = renderReceiptCanvas(rows);
-  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
-  if (!blob) throw new Error("產生圖片失敗");
+// autoOnly = true 時（結單後自動觸發），只在瀏覽器真的支援分享檔案時才動作。
+// 不支援就安靜地什麼都不做 —— 千萬不能改成自動下載，
+// 因為 LINE 內建瀏覽器處理不了自動下載，會讓整個頁面崩掉。
+async function shareReceiptImage(params, options = {}) {
+  const { autoOnly = false } = options;
 
-  const fileName = `${params.group.storeName || "揪呷團"}-帳單.png`;
-  const file = new File([blob], fileName, { type: "image/png" });
+  let file = null;
+  try {
+    const rows = buildReceiptRows(params);
+    const canvas = renderReceiptCanvas(rows);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+    if (!blob) throw new Error("產生圖片失敗");
+    const fileName = `${params.group.storeName || "揪呷團"}-帳單.png`;
+    file = new File([blob], fileName, { type: "image/png" });
 
-  // 手機支援的話直接叫出系統分享（可以選 LINE）；不支援就退回下載圖片
-  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    let canShareFile = false;
     try {
-      await navigator.share({ files: [file], title: params.group.groupName });
-      return "shared";
+      canShareFile = !!(navigator.canShare && navigator.share && navigator.canShare({ files: [file] }));
     } catch (e) {
-      if (e.name === "AbortError") return "cancelled";
+      canShareFile = false;
     }
+
+    if (canShareFile) {
+      try {
+        await navigator.share({ files: [file], title: params.group.groupName });
+        return "shared";
+      } catch (e) {
+        if (e && e.name === "AbortError") return "cancelled";
+        if (autoOnly) return "unsupported";
+      }
+    }
+
+    if (autoOnly) return "unsupported";
+
+    const url = URL.createObjectURL(file);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return "downloaded";
+  } catch (e) {
+    if (autoOnly) return "unsupported";
+    throw e;
   }
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-  return "downloaded";
 }
 
 // 使用者可能填完整網址，也可能只填 LINE ID，這裡統一轉成可以點的連結
@@ -411,12 +431,10 @@ function NameGate({ onDone }) {
 function PaymentProfileEditor({ me, onBack }) {
   const [loading, setLoading] = useState(true);
   const [contact, setContact] = useState("");
-  const [qrImage, setQrImage] = useState(null);
   const [lineUrl, setLineUrl] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [savedAt, setSavedAt] = useState(null);
-  const fileInputRef = useRef(null);
 
   useEffect(() => {
     let alive = true;
@@ -425,7 +443,6 @@ function PaymentProfileEditor({ me, onBack }) {
         const p = await api.getPaymentProfile(me);
         if (!alive) return;
         setContact(p?.contact || "");
-        setQrImage(p?.qrImage || null);
         setLineUrl(p?.lineUrl || "");
         setSavedAt(p?.updatedAt || null);
       } catch (e) {
@@ -437,22 +454,11 @@ function PaymentProfileEditor({ me, onBack }) {
     return () => { alive = false; };
   }, [me]);
 
-  const pickQrFile = async (f) => {
-    if (!f) return;
-    setError("");
-    try {
-      const { previewUrl } = await resizeImageToBase64(f, 500);
-      setQrImage(previewUrl);
-    } catch (e) {
-      setError(e.message || "圖片讀取失敗");
-    }
-  };
-
   const save = async () => {
     setSaving(true);
     setError("");
     try {
-      const updated = await api.savePaymentProfile(me, { contact: contact.trim() || null, qrImage: qrImage || null, lineUrl: lineUrl.trim() || null });
+      const updated = await api.savePaymentProfile(me, { contact: contact.trim() || null, lineUrl: lineUrl.trim() || null });
       setSavedAt(updated.updatedAt);
     } catch (e) {
       setError(e.message || "儲存失敗");
@@ -467,7 +473,6 @@ function PaymentProfileEditor({ me, onBack }) {
     try {
       await api.deletePaymentProfile(me);
       setContact("");
-      setQrImage(null);
       setLineUrl("");
       setSavedAt(null);
     } catch (e) {
@@ -499,30 +504,6 @@ function PaymentProfileEditor({ me, onBack }) {
               className="goa-input w-full rounded-xl px-3 py-2 text-sm mt-1"
               placeholder="例如：LINE Pay 轉帳代碼 123456"
             />
-          </div>
-          <div>
-            <label className="text-xs font-bold flex items-center gap-1" style={{ color: "var(--ink-soft)" }}>
-              <QrCode size={12} /> 收款 QR Code（可上傳 LINE Pay 個人收款碼截圖）
-            </label>
-            {!qrImage ? (
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="goa-card w-full flex flex-col items-center justify-center gap-1 py-8 mt-1"
-                style={{ borderStyle: "dashed" }}
-              >
-                <ImagePlus size={22} style={{ color: "var(--stamp)" }} />
-                <span className="text-xs font-bold">點此上傳收款 QR Code 截圖</span>
-              </button>
-            ) : (
-              <div className="flex items-center gap-3 mt-1">
-                <img src={qrImage} alt="收款 QR Code 預覽" className="rounded-lg" style={{ width: 88, height: 88, objectFit: "contain", background: "#fff", border: "1px solid var(--line)" }} />
-                <div className="flex flex-col gap-1.5 flex-1">
-                  <button onClick={() => fileInputRef.current?.click()} className="goa-btn-outline rounded-lg py-1.5 text-xs font-bold">重新上傳</button>
-                  <button onClick={() => setQrImage(null)} className="text-xs font-bold" style={{ color: "var(--stamp)" }}>移除這張圖片</button>
-                </div>
-              </div>
-            )}
-            <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => pickQrFile(e.target.files?.[0])} />
           </div>
           <div>
             <label className="text-xs font-bold" style={{ color: "var(--ink-soft)" }}>我的 LINE 連結或 LINE ID（選填）</label>
@@ -1664,28 +1645,25 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
   };
 
   const displayContact = profile?.contact || group.payerContact || null;
-  const displayQr = profile?.qrImage || group.payerQrImage || null;
   const payerLineLink = toLineLink(profile?.lineUrl);
 
-  const shareImage = async () => {
-    setSharingImage(true);
+  const shareImage = async (auto = false) => {
+    if (!auto) setSharingImage(true);
     setShareHint("");
-    setActionError("");
+    if (!auto) setActionError("");
     try {
-      const result = await shareReceiptImage({
-        group,
-        entries,
-        extraCharges,
-        grandTotal,
-        payerName,
-        payerContact: displayContact,
-      });
-      if (result === "downloaded") setShareHint("已下載帳單圖片，可以從相簿/下載資料夾傳到 LINE");
-      setTimeout(() => setShareHint(""), 4000);
+      const result = await shareReceiptImage(
+        { group, entries, extraCharges, grandTotal, payerName, payerContact: displayContact },
+        { autoOnly: auto }
+      );
+      if (result === "downloaded") {
+        setShareHint("已下載帳單圖片，可以從相簿/下載資料夾傳到 LINE");
+        setTimeout(() => setShareHint(""), 4000);
+      }
     } catch (e) {
-      setActionError(e.message || "產生圖片失敗");
+      if (!auto) setActionError(e.message || "產生圖片失敗");
     } finally {
-      setSharingImage(false);
+      if (!auto) setSharingImage(false);
     }
   };
 
@@ -1693,7 +1671,7 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
   useEffect(() => {
     if (!justClosed || autoSharedRef.current || profile === undefined) return;
     autoSharedRef.current = true;
-    shareImage();
+    shareImage(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [justClosed, profile]);
 
@@ -1770,7 +1748,7 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
 
           {profile === undefined ? (
             <div className="flex justify-center py-2"><Loader2 size={14} className="animate-spin" style={{ color: "var(--till)" }} /></div>
-          ) : displayContact || displayQr ? (
+          ) : displayContact ? (
             <>
               {displayContact && (
                 <input
@@ -1780,14 +1758,6 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
                   className="goa-mono text-xs rounded-lg px-2 py-1.5 w-full"
                   style={{ background: "#FFFFFF", border: "1px dashed var(--till)", color: "var(--till)" }}
                 />
-              )}
-              {displayQr && (
-                <div className="flex flex-col items-center gap-1 pt-1">
-                  <img src={displayQr} alt="付款人收款 QR Code" className="rounded-lg" style={{ width: 160, height: 160, objectFit: "contain", background: "#fff" }} />
-                  <span className="text-xs flex items-center gap-1" style={{ color: "var(--till)" }}>
-                    <QrCode size={12} /> 用 LINE 或行動支付掃描這組碼直接付款
-                  </span>
-                </div>
               )}
             </>
           ) : isMe ? (
@@ -1900,7 +1870,7 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
 
       <div className="pt-3">
         <button
-          onClick={shareImage}
+          onClick={() => shareImage(false)}
           disabled={sharingImage}
           className="goa-btn-primary w-full rounded-xl py-2.5 text-sm font-bold flex items-center justify-center gap-2"
         >
