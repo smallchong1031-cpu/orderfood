@@ -12,7 +12,7 @@ import { CSS } from "@dnd-kit/utilities";
 import {
   Plus, Minus, ChevronLeft, ChevronDown, Loader2, Users, Receipt,
   Check, Store, RefreshCw, Eye, EyeOff, AlertCircle, Sparkles,
-  UserRound, Lock, ImagePlus, Trash2, PencilLine, Wallet,
+  UserRound, Lock, ImagePlus, Trash2, PencilLine, Wallet, MessageCircle,
   Circle, CheckCircle2, Share2, Upload, Phone, GripVertical, ListChecks,
 } from "lucide-react";
 import { api } from "./api";
@@ -1697,25 +1697,24 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
 
         <div className="rounded-xl p-3 flex flex-col gap-2" style={{ background: "var(--till-bg)" }}>
           {!editingPayer ? (
-            <div className="flex items-center justify-between">
-              <span className="flex items-center gap-2 text-sm font-bold" style={{ color: "var(--till)" }}>
-                <Wallet size={15} />
-                <span>
-                  請把錢轉給付款人：
-                  {payerLineLink ? (
-                    <a
-                      href={payerLineLink}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="underline decoration-dotted underline-offset-2"
-                    >
-                      {payerName} 💬
-                    </a>
-                  ) : (
-                    payerName
-                  )}
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex flex-col gap-2 min-w-0">
+                <span className="flex items-center gap-2 text-sm font-bold" style={{ color: "var(--till)" }}>
+                  <Wallet size={15} className="shrink-0" />
+                  <span>請把錢轉給付款人：{payerName}</span>
                 </span>
-              </span>
+                {payerLineLink && (
+                  <a
+                    href={payerLineLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold w-fit"
+                    style={{ background: "#06C755", color: "#FFFFFF" }}
+                  >
+                    <MessageCircle size={13} /> 用 LINE 聯絡 {payerName}
+                  </a>
+                )}
+              </div>
               {canEdit && (
                 <button
                   onClick={() => { setPayerDraft(payerName); setEditingPayer(true); }}
