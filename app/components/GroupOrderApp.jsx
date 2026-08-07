@@ -1036,7 +1036,6 @@ function MenuDetail({ menuId, onBack, onGroupCreated, onUpdateMenu }) {
   const [showPhoto, setShowPhoto] = useState(false);
   const [expandedCats, setExpandedCats] = useState(() => new Set());
   const [shareStatus, setShareStatus] = useState("idle");
-  const [justClosed, setJustClosed] = useState(false);
   const me = useRef(null);
 
   const doShare = async () => {
@@ -2025,6 +2024,7 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
 
 function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile, onGoToGroup }) {
   const [group, setGroup] = useState(null);
+  const [justClosed, setJustClosed] = useState(false);
   const [menu, setMenu] = useState(null);
   const [myQty, setMyQty] = useState({});
   const [myOptions, setMyOptions] = useState({}); // { [itemId]: { [groupId]: choice } }
