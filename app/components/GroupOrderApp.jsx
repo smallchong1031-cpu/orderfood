@@ -260,12 +260,9 @@ function renderReceiptCanvas(rows) {
   return canvas;
 }
 
-// autoOnly = true 時（結單後自動觸發），只在瀏覽器真的支援分享檔案時才動作。
-// 不支援就安靜地什麼都不做 —— 千萬不能改成自動下載，
-// 因為 LINE 內建瀏覽器處理不了自動下載，會讓整個頁面崩掉。
-async function shareReceiptImage(params, options = {}) {
-  const { autoOnly = false } = options;
-
+// 由使用者按「分享帳單圖片」才會呼叫。整個流程包在 try 裡，
+// 就算產圖失敗也只是顯示錯誤訊息，不會把整頁弄崩。
+async function shareReceiptImage(params) {
   let file = null;
   try {
     const rows = buildReceiptRows(params);
@@ -288,11 +285,8 @@ async function shareReceiptImage(params, options = {}) {
         return "shared";
       } catch (e) {
         if (e && e.name === "AbortError") return "cancelled";
-        if (autoOnly) return "unsupported";
       }
     }
-
-    if (autoOnly) return "unsupported";
 
     const url = URL.createObjectURL(file);
     const a = document.createElement("a");
@@ -304,8 +298,7 @@ async function shareReceiptImage(params, options = {}) {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     return "downloaded";
   } catch (e) {
-    if (autoOnly) return "unsupported";
-    throw e;
+    throw e instanceof Error ? e : new Error("產生圖片失敗");
   }
 }
 
@@ -1555,7 +1548,7 @@ function ExtraChargesEditor({ group, canEdit, peopleNames, onUpdated }) {
 
 /* ============================== Receipt (closed group) ============================== */
 
-function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, onDeleteGroup, onGoToGroup, justClosed, onReopened }) {
+function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, onDeleteGroup, onGoToGroup, onReopened }) {
   const [expanded, setExpanded] = useState({});
   const [editingPayer, setEditingPayer] = useState(false);
   const [payerDraft, setPayerDraft] = useState("");
@@ -1570,7 +1563,6 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
   const [shareHint, setShareHint] = useState("");
   const [confirmReopen, setConfirmReopen] = useState(false);
   const [reopening, setReopening] = useState(false);
-  const autoSharedRef = useRef(false);
   const [deleting, setDeleting] = useState(false);
   const [actionError, setActionError] = useState("");
   const { ordering: entries, skipped: skippedPeople } = splitMembers(group.memberOrders);
@@ -1677,33 +1669,24 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
   const displayContact = profile?.contact || group.payerContact || null;
   const payerLineLink = toLineLink(profile?.lineUrl);
 
-  const shareImage = async (auto = false) => {
-    if (!auto) setSharingImage(true);
+  const shareImage = async () => {
+    setSharingImage(true);
     setShareHint("");
-    if (!auto) setActionError("");
+    setActionError("");
     try {
-      const result = await shareReceiptImage(
-        { group, entries, extraCharges, grandTotal, payerName, payerContact: displayContact },
-        { autoOnly: auto }
-      );
+      const result = await shareReceiptImage({
+        group, entries, extraCharges, grandTotal, payerName, payerContact: displayContact,
+      });
       if (result === "downloaded") {
         setShareHint("已下載帳單圖片，可以從相簿/下載資料夾傳到 LINE");
         setTimeout(() => setShareHint(""), 4000);
       }
     } catch (e) {
-      if (!auto) setActionError(e.message || "產生圖片失敗");
+      setActionError(e.message || "產生圖片失敗");
     } finally {
-      if (!auto) setSharingImage(false);
+      setSharingImage(false);
     }
   };
-
-  // 剛按下結單時自動叫出分享帳單圖片（等付款資料載入完才做，且整個頁面只做一次）
-  useEffect(() => {
-    if (!justClosed || autoSharedRef.current || profile === undefined) return;
-    autoSharedRef.current = true;
-    shareImage(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [justClosed, profile]);
 
   return (
     <div className="px-4">
@@ -1905,7 +1888,7 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
 
       <div className="pt-3">
         <button
-          onClick={() => shareImage(false)}
+          onClick={shareImage}
           disabled={sharingImage}
           className="goa-btn-primary w-full rounded-xl py-2.5 text-sm font-bold flex items-center justify-center gap-2"
         >
@@ -2060,7 +2043,6 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
 
 function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile, onGoToGroup }) {
   const [group, setGroup] = useState(null);
-  const [justClosed, setJustClosed] = useState(false);
   const [skipping, setSkipping] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
@@ -2240,7 +2222,6 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile, onGoTo
     try {
       const updated = await api.closeGroup(groupId, { payerName: payerDraft.trim() || group.creatorName });
       setGroup(updated);
-      setJustClosed(true);
       onChangedStatus?.();
     } catch (e) {
       setError(e.message || "結單失敗");
@@ -2335,8 +2316,7 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile, onGoTo
           onGoToProfile={onGoToProfile}
           onDeleteGroup={deleteGroup}
           onGoToGroup={onGoToGroup}
-          justClosed={justClosed}
-          onReopened={() => { setJustClosed(false); setConfirmingClose(false); onChangedStatus?.(); }}
+          onReopened={() => { setConfirmingClose(false); onChangedStatus?.(); }}
         />
       </div>
     );
