@@ -17,14 +17,13 @@ export async function PUT(request, { params }) {
     const { name } = await params;
     const decodedName = decodeURIComponent(name);
     const body = await request.json();
-    const contact = body.contact ? String(body.contact).trim() || null : null;
     const lineUrl = body.lineUrl ? String(body.lineUrl).trim() || null : null;
 
     const rows = await sql`
-      insert into payment_profiles (name, contact, line_url, updated_at)
-      values (${decodedName}, ${contact}, ${lineUrl}, now())
+      insert into payment_profiles (name, line_url, updated_at)
+      values (${decodedName}, ${lineUrl}, now())
       on conflict (name) do update
-        set contact = excluded.contact, line_url = excluded.line_url, updated_at = now()
+        set line_url = excluded.line_url, updated_at = now()
       returning *
     `;
     return NextResponse.json(mapPaymentProfile(rows[0]));

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { sql } from "@/lib/db";
 import { mapGroup } from "@/lib/mappers";
 import { withErrorHandling, jsonError } from "@/lib/apiHelpers";
-import { pushToLineTargets, buildBillText } from "@/lib/lineNotify";
+import { pushToLineTargets, buildBillText, getPayerProfile } from "@/lib/lineNotify";
 
 export async function POST(request, { params }) {
   return withErrorHandling(async () => {
@@ -24,7 +24,8 @@ export async function POST(request, { params }) {
     const hasOrders = Object.values(group.memberOrders || {}).some((o) => o && !o.skipped);
     if (hasOrders) {
       try {
-        await pushToLineTargets([{ type: "text", text: buildBillText(group) }]);
+        const payerProfile = await getPayerProfile(group.payerName || group.creatorName);
+        await pushToLineTargets([{ type: "text", text: buildBillText(group, payerProfile) }]);
       } catch (e) {
         console.error("結單推送 LINE 失敗：", e);
       }

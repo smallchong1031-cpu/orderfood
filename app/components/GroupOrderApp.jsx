@@ -95,11 +95,11 @@ function computePersonExtra(person, extraCharges, peopleCount) {
 
 // 把結單後的帳單畫成一張圖，方便直接分享到 LINE。
 // 分兩階段：先把每一列的內容整理成 rows，算出總高度，再實際畫上去。
-function buildReceiptRows({ group, entries, extraCharges, grandTotal, payerName, payerContact }) {
+function buildReceiptRows({ group, entries, extraCharges, grandTotal, payerName }) {
   const rows = [];
   rows.push({ type: "title", text: group.groupName });
   rows.push({ type: "sub", text: `${group.storeName}・共 ${entries.length} 人` });
-  rows.push({ type: "payer", text: `請把錢轉給付款人：${payerName}`, contact: payerContact });
+  rows.push({ type: "payer", text: `請把錢轉給付款人：${payerName}` });
   rows.push({ type: "divider" });
 
   entries.forEach(([person, order]) => {
@@ -447,7 +447,6 @@ function NameGate({ onDone }) {
 
 function PaymentProfileEditor({ me, onBack }) {
   const [loading, setLoading] = useState(true);
-  const [contact, setContact] = useState("");
   const [lineUrl, setLineUrl] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -459,7 +458,6 @@ function PaymentProfileEditor({ me, onBack }) {
       try {
         const p = await api.getPaymentProfile(me);
         if (!alive) return;
-        setContact(p?.contact || "");
         setLineUrl(p?.lineUrl || "");
         setSavedAt(p?.updatedAt || null);
       } catch (e) {
@@ -475,7 +473,7 @@ function PaymentProfileEditor({ me, onBack }) {
     setSaving(true);
     setError("");
     try {
-      const updated = await api.savePaymentProfile(me, { contact: contact.trim() || null, lineUrl: lineUrl.trim() || null });
+      const updated = await api.savePaymentProfile(me, { lineUrl: lineUrl.trim() || null });
       setSavedAt(updated.updatedAt);
     } catch (e) {
       setError(e.message || "儲存失敗");
@@ -489,7 +487,6 @@ function PaymentProfileEditor({ me, onBack }) {
     setError("");
     try {
       await api.deletePaymentProfile(me);
-      setContact("");
       setLineUrl("");
       setSavedAt(null);
     } catch (e) {
@@ -509,21 +506,12 @@ function PaymentProfileEditor({ me, onBack }) {
       <div className="px-4 flex flex-col gap-4">
         <div className="flex items-start gap-2 text-sm p-3 rounded-xl" style={{ background: "var(--till-bg)", color: "var(--till)" }}>
           <Wallet size={16} className="shrink-0 mt-0.5" />
-          <span>設定好之後，只要你被指定為某一團的付款人，這裡的收款方式跟 QR Code 就會自動出現在那團的收據上，不用每次重新上傳。</span>
+          <span>設定好之後，只要你被指定為某一團的付款人，傳到 LINE 群組的帳單上就會附你的連結，大家點一下就能轉帳給你。</span>
         </div>
 
         <div className="goa-card p-4 flex flex-col gap-3">
           <div>
-            <label className="text-xs font-bold" style={{ color: "var(--ink-soft)" }}>收款方式（例如 LINE Pay 轉帳代碼、銀行帳戶）</label>
-            <input
-              value={contact}
-              onChange={(e) => setContact(e.target.value)}
-              className="goa-input w-full rounded-xl px-3 py-2 text-sm mt-1"
-              placeholder="例如：LINE Pay 轉帳代碼 123456"
-            />
-          </div>
-          <div>
-            <label className="text-xs font-bold" style={{ color: "var(--ink-soft)" }}>我的 LINE 連結或 LINE ID（選填）</label>
+            <label className="text-xs font-bold" style={{ color: "var(--ink-soft)" }}>我的 LINE 連結或 LINE ID</label>
             <input
               value={lineUrl}
               onChange={(e) => setLineUrl(e.target.value)}
@@ -1666,7 +1654,6 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
     }
   };
 
-  const displayContact = profile?.contact || group.payerContact || null;
   const payerLineLink = toLineLink(profile?.lineUrl);
 
   const shareImage = async () => {
@@ -1675,7 +1662,7 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
     setActionError("");
     try {
       const result = await shareReceiptImage({
-        group, entries, extraCharges, grandTotal, payerName, payerContact: displayContact,
+        group, entries, extraCharges, grandTotal, payerName,
       });
       if (result === "downloaded") {
         setShareHint("已下載帳單圖片，可以從相簿/下載資料夾傳到 LINE");
@@ -1760,25 +1747,11 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
 
           {profile === undefined ? (
             <div className="flex justify-center py-2"><Loader2 size={14} className="animate-spin" style={{ color: "var(--till)" }} /></div>
-          ) : displayContact ? (
-            <>
-              {displayContact && (
-                <input
-                  readOnly
-                  value={displayContact}
-                  onFocus={(e) => e.target.select()}
-                  className="goa-mono text-xs rounded-lg px-2 py-1.5 w-full"
-                  style={{ background: "#FFFFFF", border: "1px dashed var(--till)", color: "var(--till)" }}
-                />
-              )}
-            </>
-          ) : isMe ? (
+          ) : payerLineLink ? null : isMe ? (
             <button onClick={onGoToProfile} className="text-xs font-bold flex items-center justify-center gap-1.5 py-2" style={{ color: "var(--stamp)" }}>
-              <Wallet size={13} /> 你還沒設定收款資料，點此立即設定
+              <Wallet size={13} /> 你還沒設定 LINE 連結，點此設定
             </button>
-          ) : (
-            <div className="text-xs text-center py-1" style={{ color: "var(--ink-soft)" }}>付款人尚未提供收款資料，請直接私訊詢問</div>
-          )}
+          ) : null}
         </div>
 
         <div className="goa-divider pt-3 flex flex-col gap-3">
@@ -2306,7 +2279,16 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile, onGoTo
   if (group.status === "closed") {
     return (
       <div className="pb-10">
-        <TopBar title={group.groupName} subtitle={group.storeName} onBack={onBack} />
+        <TopBar
+          title={group.groupName}
+          subtitle={group.storeName}
+          onBack={onBack}
+          right={
+            <button onClick={onGoToProfile} className="p-2" style={{ color: "var(--ink-soft)" }} aria-label="我的收款設定">
+              <Wallet size={16} />
+            </button>
+          }
+        />
         <ReceiptView
           group={group}
           menu={menu}
@@ -2334,10 +2316,13 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile, onGoTo
         subtitle={`${group.storeName} ・ 發起人 ${group.creatorName}`}
         onBack={onBack}
         right={
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
             {shareStatus === "copied" && (
-              <span className="text-xs font-bold" style={{ color: "var(--till)" }}>已複製連結</span>
+              <span className="text-xs font-bold mr-1" style={{ color: "var(--till)" }}>已複製連結</span>
             )}
+            <button onClick={onGoToProfile} className="p-2" style={{ color: "var(--ink-soft)" }} aria-label="我的收款設定">
+              <Wallet size={16} />
+            </button>
             <button onClick={doShare} className="p-2" style={{ color: "var(--ink-soft)" }} aria-label="分享">
               <Share2 size={16} />
             </button>

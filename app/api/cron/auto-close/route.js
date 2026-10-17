@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { sql } from "@/lib/db";
 import { mapGroup } from "@/lib/mappers";
-import { pushToLineTargets, buildBillText } from "@/lib/lineNotify";
+import { pushToLineTargets, buildBillText, getPayerProfile } from "@/lib/lineNotify";
 
 const AUTO_CLOSE_HOURS = 3;
 
@@ -35,7 +35,8 @@ async function runAutoClose() {
     const hasOrders = Object.values(group.memberOrders || {}).some((o) => o && !o.skipped);
     if (!hasOrders) continue; // 沒人點餐就不用吵群組
 
-    await pushToLineTargets([{ type: "text", text: buildBillText(group) }]);
+    const payerProfile = await getPayerProfile(group.payerName || group.creatorName);
+    await pushToLineTargets([{ type: "text", text: buildBillText(group, payerProfile) }]);
   }
   return { closed };
 }
