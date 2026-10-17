@@ -88,6 +88,21 @@ export async function POST(request) {
 
   const events = payload.events || [];
   for (const event of events) {
+    // 記住這個群組／聊天室，自動結單時才知道要把帳單推到哪裡
+    try {
+      const src = event.source || {};
+      const targetId = src.groupId || src.roomId || null;
+      if (targetId) {
+        await sql`
+          insert into line_targets (target_id, target_type, updated_at)
+          values (${targetId}, ${src.groupId ? "group" : "room"}, now())
+          on conflict (target_id) do update set updated_at = now()
+        `;
+      }
+    } catch (e) {
+      console.error("記錄 LINE 群組失敗：", e);
+    }
+
     if (event.type !== "message" || event.message?.type !== "text") continue;
     try {
       const text = await buildReplyText(event.message.text);

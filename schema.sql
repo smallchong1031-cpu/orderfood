@@ -23,7 +23,8 @@ create table if not exists groups (
   payer_name text,
   payer_contact text,
   payer_qr_image text,
-  status text not null default 'open' check (status in ('open', 'closed')),
+  status text not null default 'open' check (status in ('open', 'closed', 'cancelled')),
+  cancel_reason text,
   member_orders jsonb not null default '{}'::jsonb,
   paid_status jsonb not null default '{}'::jsonb,
   extra_charges jsonb not null default '[]'::jsonb,
@@ -42,3 +43,10 @@ create table if not exists payment_profiles (
 create index if not exists idx_groups_status on groups (status);
 create index if not exists idx_groups_created_at on groups (created_at desc);
 create index if not exists idx_menus_created_at on menus (created_at desc);
+
+-- 記住機器人被加入的 LINE 群組，自動結單時才知道要把帳單推到哪裡
+create table if not exists line_targets (
+  target_id text primary key,
+  target_type text not null,
+  updated_at timestamptz not null default now()
+);

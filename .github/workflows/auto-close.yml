@@ -1,0 +1,19 @@
+# 每 30 分鐘叫一次網站的「自動結單」檢查。
+# 為什麼不用 Vercel 的排程：免費方案最快只能一天跑一次，
+# 寫成每小時會直接讓部署失敗。GitHub Actions 公開 repo 免費且沒這個限制。
+name: 自動結單檢查
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:        # 也可以在 GitHub 網頁上手動按一次來測試
+
+jobs:
+  auto-close:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 呼叫自動結單
+        run: |
+          curl -sS -X POST \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.SITE_URL }}/api/cron/auto-close"

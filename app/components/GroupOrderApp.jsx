@@ -13,7 +13,7 @@ import {
   Plus, Minus, ChevronLeft, ChevronDown, Loader2, Users, Receipt,
   Check, Store, RefreshCw, Eye, EyeOff, AlertCircle, Sparkles,
   UserRound, Lock, ImagePlus, Trash2, PencilLine, Wallet, MessageCircle,
-  Circle, CheckCircle2, Share2, Upload, Phone, GripVertical, ListChecks,
+  Circle, CheckCircle2, Share2, Upload, Phone, GripVertical, ListChecks, XCircle, UserX, Ban,
 } from "lucide-react";
 import { api } from "./api";
 import { getMyName, setMyName } from "./identity";
@@ -64,6 +64,20 @@ function formatOrderItemDetails(orderItem) {
   });
   if (orderItem.note) parts.push(orderItem.note);
   return parts.length ? `（${parts.join("、")}）` : "";
+}
+
+// 把 memberOrders 拆成「有點餐的」與「表明我不用的」兩組。
+// 「我不用」在資料上是 { skipped: true, items: [], total: 0 }，
+// 不算進分攤人數、不列入付款狀態，只是讓大家知道這個人已經表態過了。
+function splitMembers(memberOrders) {
+  const ordering = [];
+  const skipped = [];
+  Object.entries(memberOrders || {}).forEach(([person, o]) => {
+    if (!o || typeof o !== "object") return;
+    if (o.skipped) skipped.push(person);
+    else ordering.push([person, o]);
+  });
+  return { ordering, skipped };
 }
 
 // 計算某人要多分攤多少額外費用（例如外送費平分，或某人品項單獨漲價）。
@@ -359,6 +373,16 @@ function TopBar({ title, subtitle, onBack, right }) {
 }
 
 function StatusChip({ status }) {
+  if (status === "cancelled") {
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 text-xs font-black px-3 py-1.5 rounded-full"
+        style={{ background: "#EAE1CF", color: "var(--ink-soft)", border: "2px solid var(--line)" }}
+      >
+        <XCircle size={11} /> 已取消
+      </span>
+    );
+  }
   const isOpen = status === "open";
   return (
     <span
@@ -1314,7 +1338,8 @@ function GroupList({ onOpenGroup, refreshKey }) {
     );
   }
   const open = groups.filter((g) => g.status === "open");
-  const closed = groups.filter((g) => g.status !== "open");
+  const closed = groups.filter((g) => g.status === "closed");
+  const cancelled = groups.filter((g) => g.status === "cancelled");
   return (
     <div className="px-4 pb-24 flex flex-col gap-5">
       {open.length > 0 && (
@@ -1327,6 +1352,12 @@ function GroupList({ onOpenGroup, refreshKey }) {
         <div className="flex flex-col gap-2">
           <div className="text-xs font-bold" style={{ color: "var(--ink-soft)" }}>已結單</div>
           {closed.map((g) => <GroupCard key={g.id} g={g} onClick={() => onOpenGroup(g.id)} />)}
+        </div>
+      )}
+      {cancelled.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <div className="text-xs font-bold" style={{ color: "var(--ink-soft)" }}>已取消</div>
+          {cancelled.map((g) => <GroupCard key={g.id} g={g} onClick={() => onOpenGroup(g.id)} />)}
         </div>
       )}
     </div>
@@ -1542,7 +1573,7 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
   const autoSharedRef = useRef(false);
   const [deleting, setDeleting] = useState(false);
   const [actionError, setActionError] = useState("");
-  const entries = Object.entries(group.memberOrders || {}).filter(([, o]) => o && typeof o === "object");
+  const { ordering: entries, skipped: skippedPeople } = splitMembers(group.memberOrders);
   const extraCharges = Array.isArray(group.extraCharges) ? group.extraCharges : [];
   const extraChargesTotal = extraCharges.reduce((s, c) => s + (Number(c.amount) || 0), 0);
   const grandTotal = entries.reduce((s, [, o]) => s + (Number(o.total) || 0), 0) + extraChargesTotal;
@@ -1858,6 +1889,12 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
               {isMe ? "點每個人下面的標籤，標記他有沒有付錢給你" : `付款狀態由付款人 ${payerName} 標記`}
             </div>
           )}
+          {skippedPeople.length > 0 && (
+            <div className="text-xs text-center" style={{ color: "var(--ink-soft)" }}>
+              <UserX size={11} className="inline mb-0.5 mr-1" />
+              這餐不用：{skippedPeople.join("、")}
+            </div>
+          )}
         </div>
 
         <div className="goa-divider pt-3 flex items-center justify-between">
@@ -2024,6 +2061,10 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
 function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile, onGoToGroup }) {
   const [group, setGroup] = useState(null);
   const [justClosed, setJustClosed] = useState(false);
+  const [skipping, setSkipping] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [cancelReasonDraft, setCancelReasonDraft] = useState("");
   const [menu, setMenu] = useState(null);
   const [myQty, setMyQty] = useState({});
   const [myOptions, setMyOptions] = useState({}); // { [itemId]: { [groupId]: choice } }
@@ -2106,6 +2147,53 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile, onGoTo
   };
 
   const myTotal = menu ? menu.items.reduce((s, it) => s + (myQty[it.id] || 0) * it.price, 0) : 0;
+
+  const markSkip = async () => {
+    setSkipping(true);
+    setError("");
+    try {
+      const updated = await api.submitOrder(groupId, {
+        person: me,
+        order: { skipped: true, items: [], total: 0 },
+      });
+      setGroup(updated);
+      setMyQty({});
+      setMyNotes({});
+      setMyOptions({});
+    } catch (e) {
+      setError(e.message || "設定失敗");
+    } finally {
+      setSkipping(false);
+    }
+  };
+
+  const cancelSkip = async () => {
+    setSkipping(true);
+    setError("");
+    try {
+      const updated = await api.submitOrder(groupId, { person: me, order: null });
+      setGroup(updated);
+    } catch (e) {
+      setError(e.message || "取消失敗");
+    } finally {
+      setSkipping(false);
+    }
+  };
+
+  const cancelGroup = async () => {
+    setCancelling(true);
+    setError("");
+    try {
+      const updated = await api.cancelGroup(groupId, { reason: cancelReasonDraft.trim() });
+      setGroup(updated);
+      setConfirmCancel(false);
+      onChangedStatus?.();
+    } catch (e) {
+      setError(e.message || "取消失敗");
+    } finally {
+      setCancelling(false);
+    }
+  };
 
   const submitOrder = async () => {
     setError("");
@@ -2192,6 +2280,48 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile, onGoTo
   }
 
 
+  if (group.status === "cancelled") {
+    return (
+      <div className="pb-10">
+        <TopBar title={group.groupName} subtitle={group.storeName} onBack={onBack} />
+        <div className="px-4">
+          <div className="goa-card p-5 flex flex-col items-center gap-3 text-center goa-pop">
+            <XCircle size={40} style={{ color: "var(--stamp)" }} />
+            <div className="goa-display font-black text-lg">這團已取消</div>
+            {group.cancelReason && (
+              <div className="text-sm px-3 py-2 rounded-xl" style={{ background: "#F5E3DE", color: "var(--stamp-dark)" }}>
+                原因：{group.cancelReason}
+              </div>
+            )}
+            <div className="text-sm" style={{ color: "var(--ink-soft)" }}>
+              大家點的餐都不算數，這筆紀錄兩天後會自動清除。
+            </div>
+            {group.menuId && (
+              <button
+                onClick={async () => {
+                  try {
+                    const res = await api.startGroup(group.menuId, { creatorName: me, force: true });
+                    onGoToGroup?.(res.group.id);
+                  } catch (e) {
+                    setError(e.message || "開新團失敗");
+                  }
+                }}
+                className="goa-btn-outline rounded-xl px-4 py-2 text-sm font-bold mt-1"
+              >
+                在這家店開新一團
+              </button>
+            )}
+          </div>
+          {error && (
+            <div className="flex items-start gap-2 text-sm p-3 rounded-xl mt-3" style={{ background: "#F5E3DE", color: "var(--stamp-dark)" }}>
+              <AlertCircle size={16} className="shrink-0 mt-0.5" /><span>{error}</span>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   if (group.status === "closed") {
     return (
       <div className="pb-10">
@@ -2212,7 +2342,8 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile, onGoTo
     );
   }
 
-  const members = Object.entries(group.memberOrders || {});
+  const { ordering: members, skipped: skippedMembers } = splitMembers(group.memberOrders);
+  const iAmSkipping = skippedMembers.includes(me);
   const groupedMenuItems = groupItemsByCategory(menu.items);
   const showMenuCategoryHeaders = groupedMenuItems.length > 1;
 
@@ -2384,6 +2515,28 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile, onGoTo
             {saving ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
             送出我的點餐
           </button>
+
+          {iAmSkipping ? (
+            <button
+              onClick={cancelSkip}
+              disabled={skipping}
+              className="w-full rounded-xl py-2 text-sm font-bold mt-2 flex items-center justify-center gap-2"
+              style={{ background: "var(--till-bg)", color: "var(--till)" }}
+            >
+              {skipping ? <Loader2 size={14} className="animate-spin" /> : <UserX size={14} />}
+              你這次不用餐（點此改成要點）
+            </button>
+          ) : (
+            <button
+              onClick={markSkip}
+              disabled={skipping}
+              className="w-full rounded-xl py-2 text-sm font-bold mt-2 flex items-center justify-center gap-2"
+              style={{ background: "transparent", border: "1.5px solid var(--line)", color: "var(--ink-soft)" }}
+            >
+              {skipping ? <Loader2 size={14} className="animate-spin" /> : <UserX size={14} />}
+              我這餐不用
+            </button>
+          )}
         </div>
 
         <div className="goa-card p-4">
@@ -2423,6 +2576,14 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile, onGoTo
               </div>
             </>
           )}
+          {skippedMembers.length > 0 && (
+            <div className="goa-divider pt-2.5 mt-2.5">
+              <span className="text-xs" style={{ color: "var(--ink-soft)" }}>
+                <UserX size={11} className="inline mb-0.5 mr-1" />
+                這餐不用：{skippedMembers.join("、")}
+              </span>
+            </div>
+          )}
         </div>
 
         <ExtraChargesEditor
@@ -2433,8 +2594,42 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile, onGoTo
         />
       </div>
 
-      <div className="px-4 pt-4">
-        {!confirmingClose ? (
+      <div className="px-4 pt-4 flex flex-col gap-2">
+        {!confirmingClose && !confirmCancel && (
+          <button
+            onClick={() => { setCancelReasonDraft(""); setConfirmCancel(true); }}
+            className="w-full rounded-xl py-2.5 text-sm font-bold flex items-center justify-center gap-2"
+            style={{ background: "transparent", border: "1.5px solid var(--stamp)", color: "var(--stamp)" }}
+          >
+            <Ban size={15} /> 取消這團（店家沒開等）
+          </button>
+        )}
+
+        {confirmCancel && (
+          <div className="goa-card p-3 flex flex-col gap-2 goa-pop">
+            <div className="text-sm text-center font-bold">要取消整團嗎？大家點的餐都會作廢。</div>
+            <input
+              value={cancelReasonDraft}
+              onChange={(e) => setCancelReasonDraft(e.target.value)}
+              placeholder="原因（選填，例如：店家今天沒開）"
+              className="goa-input rounded-xl px-3 py-2 text-sm"
+              maxLength={40}
+            />
+            <div className="flex gap-2">
+              <button onClick={() => setConfirmCancel(false)} disabled={cancelling} className="goa-btn-outline rounded-xl py-2 text-sm font-bold flex-1">先不要</button>
+              <button
+                onClick={cancelGroup}
+                disabled={cancelling}
+                className="goa-btn-primary rounded-xl py-2 text-sm font-bold flex-1 flex items-center justify-center gap-1.5"
+              >
+                {cancelling ? <Loader2 size={14} className="animate-spin" /> : <Ban size={14} />}
+                確定取消整團
+              </button>
+            </div>
+          </div>
+        )}
+
+        {!confirmCancel && !confirmingClose ? (
           <button
             onClick={() => { setPayerDraft(group.creatorName || me || ""); setConfirmingClose(true); }}
             className="w-full rounded-xl py-2.5 text-sm font-bold flex items-center justify-center gap-2"
@@ -2443,7 +2638,7 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile, onGoTo
             <Receipt size={15} />
             結單
           </button>
-        ) : (
+        ) : confirmingClose ? (
           <div className="goa-card p-3 flex flex-col gap-2 goa-pop">
             <div className="text-sm text-center font-bold">確定要結單嗎？結單後大家就不能再修改點餐了。</div>
             <div>
@@ -2472,7 +2667,7 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile, onGoTo
               </button>
             </div>
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );
@@ -2490,6 +2685,9 @@ export default function GroupOrderApp({ initialNav }) {
 
   useEffect(() => {
     setMe(getMyName());
+    // Vercel 免費方案的排程最快一天只能跑一次，所以每次有人打開網站時
+    // 也順手請伺服器檢查一下有沒有超過 3 小時該自動結單的團。
+    fetch("/api/cron/auto-close?self=1").catch(() => {});
   }, []);
 
   // 把目前畫面同步到網址列：看揪團時是 /groups/{id}，看菜單時是 /menus/{id}。
