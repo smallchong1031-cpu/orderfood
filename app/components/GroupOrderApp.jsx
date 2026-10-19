@@ -93,6 +93,177 @@ function computePersonExtra(person, extraCharges, peopleCount) {
   return extra;
 }
 
+// 把所有人點的餐合併成一張「要跟店家點什麼」的清單。
+// 同一品項的份數會加總，但備註／選項不同的會各自列一行 ——
+// 店家需要知道三碗酸辣湯裡面有一碗要加辣，全部合在一起反而會點錯。
+// menuItems 只是用來讓清單的順序跟菜單一樣，照著念比較順。
+function aggregateOrderItems(members, menuItems) {
+  const menuOrder = new Map();
+  (menuItems || []).forEach((it, i) => menuOrder.set(it.id, i));
+
+  const byItem = new Map();
+  (members || []).forEach(([person, order]) => {
+    (order?.items || []).forEach((it) => {
+      const key = it.itemId || it.name;
+      if (!byItem.has(key)) {
+        byItem.set(key, {
+          key,
+          name: it.name,
+          qty: 0,
+          // 菜單上沒有的（例如菜單更新後被刪掉的品項）排到最後面
+          seq: menuOrder.has(key) ? menuOrder.get(key) : 10000 + byItem.size,
+          variants: new Map(),
+        });
+      }
+      const entry = byItem.get(key);
+      const qty = Number(it.qty) || 0;
+      entry.qty += qty;
+      const detail = formatOrderItemDetails(it).replace(/^（/, "").replace(/）$/, "");
+      if (!entry.variants.has(detail)) entry.variants.set(detail, { detail, qty: 0, people: [] });
+      const variant = entry.variants.get(detail);
+      variant.qty += qty;
+      if (!variant.people.includes(person)) variant.people.push(person);
+    });
+  });
+
+  return Array.from(byItem.values())
+    .map((e) => ({
+      ...e,
+      // 沒備註的排最前面，念給店家時「三碗酸辣湯，其中一碗加辣」比較順
+      variants: Array.from(e.variants.values()).sort((a, b) => {
+        if (!a.detail !== !b.detail) return a.detail ? 1 : -1;
+        return b.qty - a.qty;
+      }),
+    }))
+    .sort((a, b) => a.seq - b.seq);
+}
+
+// 彙整清單的純文字版，方便直接貼到 LINE 給店家或自己留著。
+function buildSummaryText(storeName, rows) {
+  const lines = [`${storeName} 訂單彙整`, ""];
+  rows.forEach((r) => {
+    lines.push(`${r.name} ×${r.qty}`);
+    if (r.variants.length > 1 || r.variants[0]?.detail) {
+      r.variants.forEach((v) => lines.push(`　・${v.detail || "不加備註"} ×${v.qty}`));
+    }
+  });
+  const totalQty = rows.reduce((s, r) => s + r.qty, 0);
+  lines.push("", `共 ${rows.length} 種品項、${totalQty} 份`);
+  return lines.join("\n");
+}
+
+// 「我這餐不用」的人要讓大家一眼看到。
+// 標示太小的話，點餐的人會以為他還沒點，一直等他、或是多幫他點一份。
+function SkipNotice({ names, className = "" }) {
+  if (!names || names.length === 0) return null;
+  return (
+    <div
+      className={`rounded-xl px-3 py-2.5 flex items-start gap-2 ${className}`}
+      style={{ background: "var(--till-bg)", border: "1.5px solid var(--till)" }}
+    >
+      <UserX size={17} className="shrink-0 mt-0.5" style={{ color: "var(--till)" }} />
+      <div className="min-w-0">
+        <div className="text-sm font-black" style={{ color: "var(--till)" }}>
+          這餐不用 ・ {names.length} 人
+        </div>
+        <div className="flex flex-wrap gap-1.5 mt-1.5">
+          {names.map((n) => (
+            <span
+              key={n}
+              className="text-xs font-bold px-2 py-0.5 rounded-full"
+              style={{ background: "var(--card)", color: "var(--till)" }}
+            >
+              {n}
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 給打電話跟店家點餐的人看的清單：同樣的品項合併算好總份數，不用自己逐筆加。
+function OrderSummaryCard({ storeName, members, menuItems }) {
+  const [open, setOpen] = useState(true);
+  const [copied, setCopied] = useState(false);
+  const rows = aggregateOrderItems(members, menuItems);
+  if (rows.length === 0) return null;
+  const totalQty = rows.reduce((s, r) => s + r.qty, 0);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(buildSummaryText(storeName, rows));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (e) {
+      // 複製失敗就算了，畫面上本來就看得到
+    }
+  };
+
+  return (
+    <div className="goa-card p-4">
+      <button onClick={() => setOpen(!open)} className="flex items-center justify-between w-full">
+        <span className="text-sm font-black flex items-center gap-1.5">
+          <ListChecks size={15} style={{ color: "var(--stamp)" }} />
+          訂餐彙整
+          <span className="text-xs font-normal" style={{ color: "var(--ink-soft)" }}>
+            {rows.length} 種・{totalQty} 份
+          </span>
+        </span>
+        <ChevronDown
+          size={16}
+          style={{ color: "var(--ink-soft)", transform: open ? "rotate(180deg)" : "none", transition: "transform .15s ease" }}
+        />
+      </button>
+      {open && (
+        <>
+          <div className="text-xs mt-1 mb-1" style={{ color: "var(--ink-soft)" }}>
+            照這張跟店家點就好，份數已經幫你加總
+          </div>
+          {rows.map((r, i) => {
+            // 只有一種做法又沒備註時就不用再列細項，上面那行已經講完了
+            const showVariants = r.variants.length > 1 || !!r.variants[0]?.detail;
+            return (
+              <div key={r.key} className={`py-2 ${i > 0 ? "goa-divider" : ""}`}>
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-sm font-bold min-w-0">{r.name}</span>
+                  <span className="goa-mono font-black text-base shrink-0" style={{ color: "var(--stamp)" }}>
+                    ×{r.qty}
+                  </span>
+                </div>
+                {showVariants && (
+                  <div className="mt-1 flex flex-col gap-0.5">
+                    {r.variants.map((v) => (
+                      <div
+                        key={v.detail || "_plain"}
+                        className="flex items-baseline justify-between gap-2 text-xs"
+                        style={{ color: "var(--ink-soft)" }}
+                      >
+                        <span className="min-w-0">
+                          ・{v.detail || "不加備註"}
+                          <span style={{ opacity: 0.75 }}>（{v.people.join("、")}）</span>
+                        </span>
+                        <span className="goa-mono font-bold shrink-0">×{v.qty}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          <button
+            onClick={copy}
+            className="goa-btn-outline w-full rounded-xl py-2 text-sm font-bold mt-3 flex items-center justify-center gap-2"
+          >
+            {copied ? <Check size={14} /> : <ListChecks size={14} />}
+            {copied ? "已複製清單" : "複製這張清單"}
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
 // 把結單後的帳單畫成一張圖，方便直接分享到 LINE。
 // 分兩階段：先把每一列的內容整理成 rows，算出總高度，再實際畫上去。
 function buildReceiptRows({ group, entries, extraCharges, grandTotal, payerName }) {
@@ -1458,8 +1629,8 @@ function ExtraChargesEditor({ group, canEdit, peopleNames, onUpdated }) {
       {extraCharges.length === 0 && !adding && (
         <div className="text-sm text-center py-2" style={{ color: "var(--ink-soft)" }}>目前沒有額外費用或折扣</div>
       )}
-      {extraCharges.map((c) => (
-        <div key={c.id} className="flex items-center justify-between text-sm">
+      {extraCharges.map((c, i) => (
+        <div key={c.id || `ec_${i}`} className="flex items-center justify-between text-sm">
           <span>
             {c.label}
             <span className="text-xs ml-1.5" style={{ color: "var(--ink-soft)" }}>
@@ -1845,18 +2016,17 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
               {isMe ? "點每個人下面的標籤，標記他有沒有付錢給你" : `付款狀態由付款人 ${payerName} 標記`}
             </div>
           )}
-          {skippedPeople.length > 0 && (
-            <div className="text-xs text-center" style={{ color: "var(--ink-soft)" }}>
-              <UserX size={11} className="inline mb-0.5 mr-1" />
-              這餐不用：{skippedPeople.join("、")}
-            </div>
-          )}
+          <SkipNotice names={skippedPeople} className="mt-1" />
         </div>
 
         <div className="goa-divider pt-3 flex items-center justify-between">
           <span className="goa-display font-bold">總計</span>
           <span className="goa-mono font-black text-xl" style={{ color: "var(--stamp)" }}>{currency(grandTotal)}</span>
         </div>
+      </div>
+
+      <div className="pt-3">
+        <OrderSummaryCard storeName={group.storeName} members={entries} menuItems={menu?.items} />
       </div>
 
       <div className="pt-3">
@@ -2541,15 +2711,10 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile, onGoTo
               </div>
             </>
           )}
-          {skippedMembers.length > 0 && (
-            <div className="goa-divider pt-2.5 mt-2.5">
-              <span className="text-xs" style={{ color: "var(--ink-soft)" }}>
-                <UserX size={11} className="inline mb-0.5 mr-1" />
-                這餐不用：{skippedMembers.join("、")}
-              </span>
-            </div>
-          )}
+          <SkipNotice names={skippedMembers} className="mt-3" />
         </div>
+
+        <OrderSummaryCard storeName={group.storeName} members={members} menuItems={menu?.items} />
 
         <ExtraChargesEditor
           group={group}
