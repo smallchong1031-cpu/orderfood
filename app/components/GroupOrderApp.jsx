@@ -182,6 +182,173 @@ function SkipNotice({ names, className = "" }) {
   );
 }
 
+// 複製文字到剪貼簿。LINE 內建瀏覽器有時候擋 clipboard API，所以留一條老路。
+async function copyToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (e) {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.top = "0";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return ok;
+    } catch (e2) {
+      return false;
+    }
+  }
+}
+
+// 結單後把帳單文字交給結單的人，自己貼到 LINE 群組。
+// 不用機器人推播，是因為 LINE 的推播按「收到的人數」計費 ——
+// 23 人的群組推一張帳單就扣 23 則，免費版一個月只有 200 則，大概 8 張就沒了。
+// 人自己在群組貼訊息完全免費，所以改成複製貼上。
+function LineBillPanel({ group }) {
+  const [bill, setBill] = useState(null);
+  const [loadError, setLoadError] = useState("");
+  const [copyState, setCopyState] = useState("");
+  const [pushResult, setPushResult] = useState(null);
+  const [pushing, setPushing] = useState(false);
+  // 在 effect 裡判斷，避免伺服器端算出 false、瀏覽器算出 true 造成 hydration 不一致
+  const [canShare, setCanShare] = useState(false);
+
+  useEffect(() => {
+    setCanShare(typeof navigator !== "undefined" && !!navigator.share);
+  }, []);
+
+  // 額外費用、付款人都可能在結單後才改，帳單文字要跟著重新產生
+  const signature = JSON.stringify({
+    m: group.memberOrders,
+    e: group.extraCharges,
+    p: group.payerName,
+  });
+
+  useEffect(() => {
+    let alive = true;
+    setLoadError("");
+    (async () => {
+      try {
+        const data = await api.getBillText(group.id);
+        if (alive) setBill(data);
+      } catch (e) {
+        if (alive) setLoadError(e.message || "讀取帳單失敗");
+      }
+    })();
+    return () => { alive = false; };
+  }, [group.id, signature]);
+
+  const doCopy = async () => {
+    const ok = await copyToClipboard(bill.text);
+    setCopyState(ok ? "copied" : "failed");
+    setTimeout(() => setCopyState(""), 2500);
+  };
+
+  const doShare = async () => {
+    try {
+      await navigator.share({ text: bill.text });
+    } catch (e) {
+      // 使用者自己取消分享也會走到這裡，不用特別報錯
+    }
+  };
+
+  const doPush = async () => {
+    setPushing(true);
+    try {
+      setPushResult(await api.notifyLine(group.id));
+    } catch (e) {
+      setPushResult({ sent: 0, reason: e.message || "推播失敗" });
+    } finally {
+      setPushing(false);
+    }
+  };
+
+  // 中文經過 percent encoding 會膨脹成 9 倍（一個字 3 bytes、每 byte 3 字元），
+  // 所以 1000 字的帳單會變成 7000 字的網址。太長有被 LINE 截斷的風險，
+  // 超過就改用精簡版（每人金額＋明細網址）。5～10 人的團都還在完整版範圍內。
+  const SHARE_LIMIT = 8000;
+  const shareUrlFor = (t) => `https://line.me/R/share?text=${encodeURIComponent(t)}`;
+
+  let shareUrl = null;
+  let isCompact = false;
+  if (bill) {
+    const full = shareUrlFor(bill.text);
+    if (full.length <= SHARE_LIMIT || !bill.compactText) {
+      shareUrl = full;
+    } else {
+      shareUrl = shareUrlFor(bill.compactText);
+      isCompact = true;
+    }
+  }
+
+  return (
+    <div className="goa-card p-4 flex flex-col gap-2.5">
+      <div className="text-sm font-black flex items-center gap-1.5">
+        <MessageCircle size={16} style={{ color: "#06C755" }} />
+        把帳單傳到群組
+      </div>
+
+      {loadError ? (
+        <div className="text-xs" style={{ color: "var(--stamp)" }}>{loadError}</div>
+      ) : !bill ? (
+        <div className="flex items-center gap-2 text-xs py-3" style={{ color: "var(--ink-soft)" }}>
+          <Loader2 size={13} className="animate-spin" /> 產生帳單中…
+        </div>
+      ) : (
+        <>
+          <div className="text-xs" style={{ color: "var(--ink-soft)" }}>
+            按下去會跳出 LINE 的傳送畫面，帳單已經幫你填好了，選群組按傳送就好。
+          </div>
+
+          {/* 用 <a> 而不是 button：原生導向最可靠，在 LINE 內建瀏覽器裡也不會被擋 */}
+          <a
+            href={shareUrl}
+            className="w-full rounded-xl py-3 text-base font-black flex items-center justify-center gap-2"
+            style={{ background: "#06C755", color: "#FFFFFF", textDecoration: "none" }}
+          >
+            <MessageCircle size={18} />
+            傳帳單到 LINE
+          </a>
+
+          {isCompact && (
+            <div className="text-xs flex items-start gap-1" style={{ color: "var(--ink-soft)" }}>
+              <AlertCircle size={12} className="shrink-0 mt-0.5" />
+              <span>這團人多，傳出去的是每個人的金額加一條明細網址 —— 完整品項太長會被 LINE 截掉。</span>
+            </div>
+          )}
+
+          <div className="flex items-center justify-center gap-3 text-xs pt-0.5">
+            {canShare && (
+              <button onClick={doShare} style={{ color: "var(--ink-soft)", textDecoration: "underline" }}>
+                用手機內建分享
+              </button>
+            )}
+            <button onClick={doCopy} style={{ color: "var(--ink-soft)", textDecoration: "underline" }}>
+              {copyState === "copied" ? "已複製" : copyState === "failed" ? "複製失敗" : "電腦版請改用複製"}
+            </button>
+            {bill.pushEnabled && (
+              <button onClick={doPush} disabled={pushing} style={{ color: "var(--ink-soft)", textDecoration: "underline" }}>
+                {pushing ? "推播中…" : "用機器人推播"}
+              </button>
+            )}
+          </div>
+
+          {pushResult && (
+            <div className="text-xs text-center" style={{ color: pushResult.sent > 0 ? "var(--till)" : "var(--stamp)" }}>
+              {pushResult.sent > 0 ? "已推播到 LINE 群組" : pushResult.reason || "推播失敗"}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 // 給打電話跟店家點餐的人看的清單：同樣的品項合併算好總份數，不用自己逐筆加。
 function OrderSummaryCard({ storeName, members, menuItems }) {
   const [open, setOpen] = useState(true);
@@ -2041,6 +2208,10 @@ function ReceiptView({ group, menu, me, canEdit, onGroupUpdated, onGoToProfile, 
         {shareHint && (
           <div className="text-xs text-center mt-1.5" style={{ color: "var(--till)" }}>{shareHint}</div>
         )}
+      </div>
+
+      <div className="pt-3">
+        <LineBillPanel group={group} />
       </div>
 
       <div className="pt-3">
