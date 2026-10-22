@@ -37,6 +37,8 @@ export const api = {
   togglePaid: (id, data) => request(`/groups/${id}/paid`, { method: "POST", body: JSON.stringify(data) }),
   markAllPaid: (id) => request(`/groups/${id}/paid-all`, { method: "POST" }),
   reopenGroup: (id) => request(`/groups/${id}/reopen`, { method: "POST" }),
+  getBillText: (id) => request(`/groups/${id}/notify`),
+  notifyLine: (id) => request(`/groups/${id}/notify`, { method: "POST" }),
   cancelGroup: (id, data) => request(`/groups/${id}/cancel`, { method: "POST", body: JSON.stringify(data || {}) }),
   updateExtraCharges: (id, extraCharges) =>
     request(`/groups/${id}/extra-charges`, { method: "PUT", body: JSON.stringify({ extraCharges }) }),

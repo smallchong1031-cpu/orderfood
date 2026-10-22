@@ -17,9 +17,10 @@ async function runAutoClose() {
     order by created_at asc
     limit 20
   `;
-  if (due.length === 0) return { closed: 0 };
+  if (due.length === 0) return { closed: 0, pushed: [] };
 
   let closed = 0;
+  const pushed = [];
   for (const row of due) {
     const updated = await sql`
       update groups
@@ -35,10 +36,15 @@ async function runAutoClose() {
     const hasOrders = Object.values(group.memberOrders || {}).some((o) => o && !o.skipped);
     if (!hasOrders) continue; // 沒人點餐就不用吵群組
 
+    // 同上：推播會吃掉按人數計算的額度，預設不推，等人進網站自己把帳單貼到群組
+    if (process.env.LINE_AUTO_PUSH !== "1") continue;
+
     const payerProfile = await getPayerProfile(group.payerName || group.creatorName);
-    await pushToLineTargets([{ type: "text", text: buildBillText(group, payerProfile) }]);
+    const result = await pushToLineTargets([{ type: "text", text: buildBillText(group, payerProfile) }]);
+    pushed.push({ group: group.groupName, sent: result.sent, reason: result.reason || null });
   }
-  return { closed };
+  // 把推送結果一起回傳，排程跑完才看得出帳單到底有沒有傳出去
+  return { closed, pushed };
 }
 
 export async function GET(request) {
