@@ -29,7 +29,9 @@ create table if not exists groups (
   paid_status jsonb not null default '{}'::jsonb,
   extra_charges jsonb not null default '[]'::jsonb,
   created_at timestamptz not null default now(),
-  closed_at timestamptz
+  closed_at timestamptz,
+  -- 自動結單的時間。開團時預設 3 小時後，在團的頁面可以改（例如改成隔天早上）。
+  close_at timestamptz
 );
 
 create table if not exists payment_profiles (
@@ -50,3 +52,6 @@ create table if not exists line_targets (
   target_type text not null,
   updated_at timestamptz not null default now()
 );
+
+-- ====== 升級用：已經建好資料庫的話，只要執行下面這一行 ======
+alter table groups add column if not exists close_at timestamptz;

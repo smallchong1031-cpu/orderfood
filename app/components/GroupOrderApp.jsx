@@ -13,10 +13,11 @@ import {
   Plus, Minus, ChevronLeft, ChevronDown, Loader2, Users, Receipt,
   Check, Store, RefreshCw, Eye, EyeOff, AlertCircle, Sparkles,
   UserRound, Lock, ImagePlus, Trash2, PencilLine, Wallet, MessageCircle,
-  Circle, CheckCircle2, Share2, Upload, Phone, GripVertical, ListChecks, XCircle, UserX, Ban,
+  Circle, CheckCircle2, Share2, Upload, Phone, GripVertical, ListChecks, XCircle, UserX, Ban, Clock,
 } from "lucide-react";
 import { api } from "./api";
 import { getMyName, setMyName } from "./identity";
+import { DEFAULT_CLOSE_HOURS } from "@/lib/deadline";
 
 /* ============================== helpers ============================== */
 
@@ -64,6 +65,52 @@ function formatOrderItemDetails(orderItem) {
   });
   if (orderItem.note) parts.push(orderItem.note);
   return parts.length ? `（${parts.join("、")}）` : "";
+}
+
+// ---- 截止時間（自動結單時間） ----
+
+// 舊資料沒有 closeAt，照以前的規則當作「開團後 3 小時」
+function effectiveCloseAt(group) {
+  if (group?.closeAt) return new Date(group.closeAt);
+  const created = group?.createdAt ? new Date(group.createdAt) : new Date();
+  return new Date(created.getTime() + DEFAULT_CLOSE_HOURS * 60 * 60 * 1000);
+}
+
+const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
+const pad2 = (n) => String(n).padStart(2, "0");
+
+// 顯示成「今天 15:30」「明天 06:30」「11/12（三）07:00」，比完整日期好讀
+function formatDeadline(date) {
+  const d = new Date(date);
+  const hm = `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  const startOf = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const dayDiff = Math.round((startOf(d) - startOf(new Date())) / 86400000);
+  if (dayDiff === 0) return `今天 ${hm}`;
+  if (dayDiff === 1) return `明天 ${hm}`;
+  return `${d.getMonth() + 1}/${d.getDate()}（${WEEKDAYS[d.getDay()]}）${hm}`;
+}
+
+function formatTimeLeft(date) {
+  const mins = Math.round((new Date(date).getTime() - Date.now()) / 60000);
+  if (mins <= 0) return "時間到了，下一次有人打開網站就會結單";
+  if (mins < 60) return `還有 ${mins} 分鐘`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m ? `還有 ${h} 小時 ${m} 分` : `還有 ${h} 小時`;
+}
+
+// 下一個「HH:MM」：現在 04:58 選 06:30 → 今天 06:30；現在 20:00 選 06:30 → 明天 06:30
+function nextOccurrence(hour, minute) {
+  const t = new Date();
+  t.setHours(hour, minute, 0, 0);
+  if (t.getTime() <= Date.now() + 5 * 60 * 1000) t.setDate(t.getDate() + 1);
+  return t;
+}
+
+// <input type="datetime-local"> 要的格式（本地時間，不帶時區）
+function toLocalInputValue(date) {
+  const d = new Date(date);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
 
 // 把 memberOrders 拆成「有點餐的」與「表明我不用的」兩組。
@@ -203,6 +250,131 @@ async function copyToClipboard(text) {
       return false;
     }
   }
+}
+
+// 進行中的團最上面那條「幾點自動結單」，可以改時間。
+// 預設是開團後 3 小時；要預約隔天早餐的話，晚上開團後改成「早餐 明天 06:30」，
+// 不然 3 小時一到就被自動結單，大家沒辦法點。
+function DeadlineBar({ group, onUpdated }) {
+  const [editing, setEditing] = useState(false);
+  const [custom, setCustom] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [, setTick] = useState(0);
+
+  // 每分鐘重畫一次，讓「還有幾分鐘」跟著走
+  useEffect(() => {
+    const t = setInterval(() => setTick((x) => x + 1), 60 * 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const closeAt = effectiveCloseAt(group);
+  const minsLeft = (closeAt.getTime() - Date.now()) / 60000;
+  const urgent = minsLeft < 30;
+
+  const save = async (date) => {
+    setSaving(true);
+    setError("");
+    try {
+      const updated = await api.setDeadline(group.id, new Date(date).toISOString());
+      onUpdated?.(updated);
+      setEditing(false);
+    } catch (e) {
+      setError(e.message || "改時間失敗");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const base = Math.max(closeAt.getTime(), Date.now());
+  const presets = [
+    { label: "延長 1 小時", date: new Date(base + 60 * 60 * 1000) },
+    { label: "延長 3 小時", date: new Date(base + 3 * 60 * 60 * 1000) },
+    { label: "早餐", date: nextOccurrence(6, 30) },
+    { label: "午餐", date: nextOccurrence(11, 0) },
+    { label: "晚餐", date: nextOccurrence(16, 30) },
+  ];
+
+  if (!editing) {
+    return (
+      <div
+        className="goa-card px-3 py-2.5 flex items-center justify-between gap-2"
+        style={urgent ? { borderColor: "var(--stamp)" } : undefined}
+      >
+        <div className="min-w-0 flex items-start gap-2">
+          <Clock size={16} className="shrink-0 mt-0.5" style={{ color: urgent ? "var(--stamp)" : "var(--ink-soft)" }} />
+          <div className="min-w-0">
+            <div className="text-sm font-bold">{formatDeadline(closeAt)} 自動結單</div>
+            <div className="text-xs" style={{ color: urgent ? "var(--stamp)" : "var(--ink-soft)" }}>
+              {formatTimeLeft(closeAt)}
+            </div>
+          </div>
+        </div>
+        <button
+          onClick={() => { setCustom(toLocalInputValue(closeAt)); setError(""); setEditing(true); }}
+          className="goa-btn-outline rounded-lg px-3 py-1.5 text-xs font-bold shrink-0"
+        >
+          改時間
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="goa-card p-3 flex flex-col gap-2.5 goa-pop">
+      <div className="text-sm font-bold flex items-center gap-1.5">
+        <Clock size={15} style={{ color: "var(--stamp)" }} /> 什麼時候自動結單？
+      </div>
+      <div className="text-xs" style={{ color: "var(--ink-soft)" }}>
+        現在設定：{formatDeadline(closeAt)}。要預約隔天的餐，選「早餐」或自己選時間。
+      </div>
+
+      <div className="flex flex-wrap gap-1.5">
+        {presets.map((p) => (
+          <button
+            key={p.label}
+            onClick={() => save(p.date)}
+            disabled={saving}
+            className="rounded-full px-3 py-1.5 text-xs font-bold"
+            style={{ background: "var(--paper)", border: "1.5px solid var(--line)", color: "var(--ink)" }}
+          >
+            {p.label === "延長 1 小時" || p.label === "延長 3 小時"
+              ? `${p.label}（${formatDeadline(p.date)}）`
+              : `${p.label} ${formatDeadline(p.date)}`}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex items-center gap-2">
+        <input
+          type="datetime-local"
+          value={custom}
+          min={toLocalInputValue(new Date())}
+          onChange={(e) => setCustom(e.target.value)}
+          className="goa-input rounded-xl px-3 py-2 text-sm flex-1 min-w-0"
+        />
+        <button
+          onClick={() => custom && save(custom)}
+          disabled={saving || !custom}
+          className="goa-btn-primary rounded-xl px-3 py-2 text-sm font-bold shrink-0 flex items-center gap-1"
+        >
+          {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+          設定
+        </button>
+      </div>
+
+      {error && <div className="text-xs" style={{ color: "var(--stamp)" }}>{error}</div>}
+
+      <button
+        onClick={() => setEditing(false)}
+        disabled={saving}
+        className="text-xs self-center"
+        style={{ color: "var(--ink-soft)", textDecoration: "underline" }}
+      >
+        先不要改
+      </button>
+    </div>
+  );
 }
 
 // 結單後把帳單文字交給結單的人，自己貼到 LINE 群組。
@@ -1608,6 +1780,11 @@ function GroupCard({ g, onClick }) {
       <div className="text-xs flex items-center gap-1" style={{ color: "var(--ink-soft)" }}>
         <Store size={12} /> {g.storeName}
       </div>
+      {g.status === "open" && (
+        <div className="text-xs flex items-center gap-1" style={{ color: "var(--ink-soft)" }}>
+          <Clock size={12} /> {formatDeadline(effectiveCloseAt(g))} 自動結單
+        </div>
+      )}
       {g.status === "closed" && (g.payerName || g.creatorName) && (
         <div className="text-xs flex items-center gap-1 font-bold" style={{ color: "var(--till)" }}>
           <Wallet size={12} /> 付款人：{g.payerName || g.creatorName}
@@ -2692,6 +2869,10 @@ function GroupView({ groupId, me, onBack, onChangedStatus, onGoToProfile, onGoTo
         <span className="text-xs" style={{ color: "var(--ink-soft)" }}>{members.length} 人已點餐</span>
       </div>
 
+      <div className="px-4 mb-3">
+        <DeadlineBar group={group} onUpdated={setGroup} />
+      </div>
+
       {menu.storePhone && (
         <div className="px-4 mb-4">
           <a
@@ -2987,7 +3168,7 @@ export default function GroupOrderApp({ initialNav }) {
   useEffect(() => {
     setMe(getMyName());
     // Vercel 免費方案的排程最快一天只能跑一次，所以每次有人打開網站時
-    // 也順手請伺服器檢查一下有沒有超過 3 小時該自動結單的團。
+    // 也順手請伺服器檢查一下有沒有超過截止時間、該自動結單的團。
     fetch("/api/cron/auto-close?self=1").catch(() => {});
   }, []);
 

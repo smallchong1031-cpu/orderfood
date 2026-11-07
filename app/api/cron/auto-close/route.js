@@ -2,10 +2,10 @@ import { NextResponse } from "next/server";
 import { sql } from "@/lib/db";
 import { mapGroup } from "@/lib/mappers";
 import { pushToLineTargets, buildBillText, getPayerProfile } from "@/lib/lineNotify";
+import { DEFAULT_CLOSE_HOURS } from "@/lib/deadline";
 
-const AUTO_CLOSE_HOURS = 3;
-
-// 把開超過 3 小時還沒結單的團自動結單，並把帳單推到 LINE 群組。
+// 把超過截止時間（close_at）還沒結單的團自動結單，並把帳單推到 LINE 群組。
+// 舊資料沒有 close_at 的話，照以前的規則用「開團後 3 小時」。
 // 付款人先預設為發起人，之後在收據上隨時可以改。
 // 這支可以被兩種方式觸發：
 //  1. 外部排程（GitHub Actions）帶 Authorization: Bearer <CRON_SECRET>
@@ -13,7 +13,8 @@ const AUTO_CLOSE_HOURS = 3;
 async function runAutoClose() {
   const due = await sql`
     select * from groups
-    where status = 'open' and created_at < now() - (${AUTO_CLOSE_HOURS} || ' hours')::interval
+    where status = 'open'
+      and coalesce(close_at, created_at + make_interval(hours => ${DEFAULT_CLOSE_HOURS}::int)) < now()
     order by created_at asc
     limit 20
   `;

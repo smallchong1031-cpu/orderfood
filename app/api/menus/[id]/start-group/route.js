@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { sql } from "@/lib/db";
 import { mapGroup } from "@/lib/mappers";
 import { withErrorHandling, jsonError } from "@/lib/apiHelpers";
+import { DEFAULT_CLOSE_HOURS } from "@/lib/deadline";
 
 // 「加入或開團」：這是一鍵開團網址背後的邏輯。
 // 規則（依序判斷）：
@@ -45,8 +46,9 @@ export async function POST(request, { params }) {
     }
 
     const created = await sql`
-      insert into groups (menu_id, store_name, group_name, creator_name, status)
-      values (${id}, ${menu.store_name}, ${`${menu.store_name} 揪團`}, ${creatorName}, 'open')
+      insert into groups (menu_id, store_name, group_name, creator_name, status, close_at)
+      values (${id}, ${menu.store_name}, ${`${menu.store_name} 揪團`}, ${creatorName}, 'open',
+              now() + make_interval(hours => ${DEFAULT_CLOSE_HOURS}::int))
       returning *
     `;
     return NextResponse.json({ group: mapGroup(created[0]), mode: "created" });
